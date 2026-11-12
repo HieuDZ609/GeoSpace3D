@@ -1,7 +1,7 @@
-"""OpenGL viewport: camera 360, Oxyz, ve doi tuong, click chon diem."""
+"""OpenGL viewport: camera POV (FPS), Oxyz, ve doi tuong, click chon diem."""
 import math
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from OpenGL.GL import *
@@ -14,13 +14,21 @@ class Viewport(QOpenGLWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.scene = None
-        self.yaw = 35.0
-        self.pitch = 22.0
-        self.dist = 18.0
-        self.target = [0.0, 0.0, 0.0]
+        # Camera POV (first-person): vi tri mat + huong nhin
+        self.pos = [14.0, 11.0, 9.0]
+        self.yaw = -141.0     # do, nhin ve goc toa do
+        self.pitch = -26.0
+        self.move_speed = 10.0
         self.ortho = False
         self.show_grid = True
         self.show_labels = True
+        # movement smoothing
+        self._keys = set()
+        self._vel = [0.0, 0.0, 0.0]
+        self._move_timer = QTimer(self)
+        self._move_timer.setInterval(16)   # ~60 Hz
+        self._move_timer.timeout.connect(self._update_move)
+        # mouse
         self._last = None
         self._mode = None
         self._mv = None
@@ -46,6 +54,18 @@ class Viewport(QOpenGLWidget):
     def resizeGL(self, w, h):
         glViewport(0, 0, max(1, w), max(1, h))
 
+    def _forward(self):
+        # vector nhin theo (yaw, pitch)
+        y = math.radians(self.yaw)
+        p = math.radians(self.pitch)
+        return (math.cos(p) * math.cos(y),
+                math.cos(p) * math.sin(y),
+                math.sin(p))
+
+    def _right(self):
+        y = math.radians(self.yaw)
+        return (-math.sin(y), math.cos(y), 0.0)
+
     def _setup_camera(self):
         w = max(1, self.width())
         h = max(1, self.height())
@@ -53,21 +73,15 @@ class Viewport(QOpenGLWidget):
         glLoadIdentity()
         aspect = w / h
         if self.ortho:
-            s = self.dist * 0.5
+            s = 12.0
             glOrtho(-s * aspect, s * aspect, -s, s, 0.1, 1000.0)
         else:
-            gluPerspective(45.0, aspect, 0.1, 1000.0)
+            gluPerspective(60.0, aspect, 0.1, 1000.0)
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
-        yaw = math.radians(self.yaw)
-        pitch = math.radians(self.pitch)
-        eye = [
-            self.target[0] + self.dist * math.cos(pitch) * math.cos(yaw),
-            self.target[1] + self.dist * math.cos(pitch) * math.sin(yaw),
-            self.target[2] + self.dist * math.sin(pitch),
-        ]
-        gluLookAt(eye[0], eye[1], eye[2],
-                  self.target[0], self.target[1], self.target[2],
+        fx, fy, fz = self._forward()
+        gluLookAt(self.pos[0], self.pos[1], self.pos[2],
+                  self.pos[0] + fx, self.pos[1] + fy, self.pos[2] + fz,
                   0, 0, 1)
         self._mv = glGetDoublev(GL_MODELVIEW_MATRIX)
         self._proj = glGetDoublev(GL_PROJECTION_MATRIX)
@@ -91,7 +105,6 @@ class Viewport(QOpenGLWidget):
             self._draw_labels()
 
     def _reset_gl_state(self):
-        """QPainter o frame truoc co the de lai state la; dat lai moi frame."""
         glEnable(GL_DEPTH_TEST)
         glDepthFunc(GL_LEQUAL)
         glDepthMask(GL_TRUE)
@@ -167,7 +180,6 @@ class Viewport(QOpenGLWidget):
         glEnd()
 
     def _iter_lines(self):
-        """Sinh (p0, p1) cho moi canh can ve."""
         for o in self._visible():
             if o.kind in ("segment", "line"):
                 a, b = o.value
@@ -176,13 +188,9 @@ class Viewport(QOpenGLWidget):
                 for poly in o.value.get("polylines", []):
                     for i in range(len(poly) - 1):
                         yield poly[i], poly[i + 1]
-                for poly in o.value.get("polylines", []):
-                    if len(poly) > 1:
-                        yield poly[-1], poly[0]
 
     def _draw_edges(self):
         lines = list(self._iter_lines())
-        # 1) net dut: tat ca canh (ke ca bi che)
         glDepthMask(GL_FALSE)
         glDepthFunc(GL_LEQUAL)
         glEnable(GL_LINE_STIPPLE)
@@ -194,7 +202,6 @@ class Viewport(QOpenGLWidget):
             glVertex3dv(a); glVertex3dv(b)
         glEnd()
         glDisable(GL_LINE_STIPPLE)
-        # 2) net lien: chi canh nhin thay
         glDepthFunc(GL_LESS)
         glLineWidth(1.6)
         glBegin(GL_LINES)
@@ -212,7 +219,6 @@ class Viewport(QOpenGLWidget):
                     for i in range(len(poly) - 1):
                         glVertex3dv(poly[i]); glVertex3dv(poly[i + 1])
         glEnd()
-        # 3) do dac
         glLineWidth(1.4)
         glBegin(GL_LINES)
         glColor4f(1.0, 0.9, 0.4, 1.0)
@@ -226,7 +232,6 @@ class Viewport(QOpenGLWidget):
 
     def _draw_points(self):
         pts = self._visible(["point"])
-        # diem thuong
         glPointSize(9.0)
         glBegin(GL_POINTS)
         for o in pts:
@@ -236,8 +241,7 @@ class Viewport(QOpenGLWidget):
             glColor4f(c[0], c[1], c[2], 1.0)
             glVertex3dv(o.value)
         glEnd()
-        # diem dang chon (to hon, mau cam)
-        if self.selected_id and self.selected_id in self.scene.objects:
+        if self.selected_id and self.scene and self.selected_id in self.scene.objects:
             o = self.scene.objects[self.selected_id]
             if o.visible and o.kind == "point" and o.value is not None:
                 glPointSize(14.0)
@@ -247,7 +251,6 @@ class Viewport(QOpenGLWidget):
                 glEnd()
         glPointSize(9.0)
 
-    # ---------------- overlay text ----------------
     def _draw_labels(self):
         if self.scene is None:
             return
@@ -287,11 +290,45 @@ class Viewport(QOpenGLWidget):
                                 self._mv, self._proj, self._vp)
         return (float(sx), float(self._vp[3] - sy), float(sz))
 
+    # ---------------- movement (smooth) ----------------
+    def _update_move(self):
+        # muc tieu van toc tu phim dang nhan
+        fx, fy, _ = self._forward()
+        rx, ry, _ = self._right()
+        speed = self.move_speed * (2.0 if (Qt.Key.Key_Shift in self._keys) else 1.0)
+        tvx = tvy = tvz = 0.0
+        if Qt.Key.Key_W in self._keys:
+            tvx += fx * speed; tvy += fy * speed
+        if Qt.Key.Key_S in self._keys:
+            tvx -= fx * speed; tvy -= fy * speed
+        if Qt.Key.Key_A in self._keys:
+            tvx -= rx * speed; tvy -= ry * speed
+        if Qt.Key.Key_D in self._keys:
+            tvx += rx * speed; tvy += ry * speed
+        if Qt.Key.Key_Space in self._keys:
+            tvz += speed
+        if Qt.Key.Key_Control in self._keys:
+            tvz -= speed
+        # lerp van toc (gia toc muot)
+        a = 0.25
+        self._vel[0] += (tvx - self._vel[0]) * a
+        self._vel[1] += (tvy - self._vel[1]) * a
+        self._vel[2] += (tvz - self._vel[2]) * a
+        dt = 0.016
+        self.pos[0] += self._vel[0] * dt
+        self.pos[1] += self._vel[1] * dt
+        self.pos[2] += self._vel[2] * dt
+        # dung timer khi khong con phim va van toc nho
+        if not self._keys and (abs(self._vel[0]) + abs(self._vel[1]) + abs(self._vel[2])) < 0.01:
+            self._vel = [0.0, 0.0, 0.0]
+            self._move_timer.stop()
+        self.update()
+
     # ---------------- mouse ----------------
     def mousePressEvent(self, ev):
         self._last = ev.position()
         if ev.button() == Qt.MouseButton.LeftButton:
-            self._mode = "rotate"
+            self._mode = "look"
             picked = self._try_pick(ev.position())
             self.selected_id = picked or None
             self.objectClicked.emit(picked or "")
@@ -305,15 +342,18 @@ class Viewport(QOpenGLWidget):
         dx = ev.position().x() - self._last.x()
         dy = ev.position().y() - self._last.y()
         self._last = ev.position()
-        if self._mode == "rotate":
-            # keo chuot theo kieu "cam vat the": keo sang phai -> hinh quay sang phai
-            self.yaw -= dx * 0.5
-            self.pitch = max(-89, min(89, self.pitch - dy * 0.5))
+        if self._mode == "look":
+            # POV: keo chuot de nhin (dao chieu cho tu nhien)
+            self.yaw -= dx * 0.25
+            self.pitch = max(-89, min(89, self.pitch - dy * 0.25))
             self.update()
         elif self._mode == "pan":
-            k = 0.02 * (self.dist / 10.0)
-            self.target[0] -= dx * k
-            self.target[1] += dy * k
+            # pan muc tieu (khong co target, di chuyen ngang)
+            r = self._right()
+            step = self.move_speed * 0.02
+            self.pos[0] -= r[0] * dx * step
+            self.pos[1] -= r[1] * dx * step
+            self.pos[2] += dy * step
             self.update()
 
     def mouseReleaseEvent(self, ev):
@@ -322,41 +362,36 @@ class Viewport(QOpenGLWidget):
 
     def wheelEvent(self, ev):
         d = ev.angleDelta().y()
-        self.dist = max(2.0, min(300.0, self.dist * (0.9 if d > 0 else 1.1)))
+        self.move_speed = max(2.0, min(60.0, self.move_speed * (1.15 if d > 0 else 0.87)))
         self.update()
 
     def keyPressEvent(self, ev):
         k = ev.key()
-        step = self.dist * 0.06
-        yaw = math.radians(self.yaw)
-        fx, fy = math.cos(yaw), math.sin(yaw)   # forward (towards view dir on ground)
-        rx, ry = -math.sin(yaw), math.cos(yaw)   # right
-        if k == Qt.Key.Key_W:
-            self.target[0] += fx * step; self.target[1] += fy * step
-        elif k == Qt.Key.Key_S:
-            self.target[0] -= fx * step; self.target[1] -= fy * step
-        elif k == Qt.Key.Key_A:
-            self.target[0] -= rx * step; self.target[1] -= ry * step
-        elif k == Qt.Key.Key_D:
-            self.target[0] += rx * step; self.target[1] += ry * step
-        elif k == Qt.Key.Key_Home:
+        if k in (Qt.Key.Key_W, Qt.Key.Key_A, Qt.Key.Key_S, Qt.Key.Key_D,
+                 Qt.Key.Key_Space, Qt.Key.Key_Control, Qt.Key.Key_Shift):
+            self._keys.add(k)
+            if not self._move_timer.isActive():
+                self._move_timer.start()
+            return
+        if k == Qt.Key.Key_Home:
             self.reset_view()
         elif k == Qt.Key.Key_5:
             self.ortho = not self.ortho
         elif k == Qt.Key.Key_1:
-            self.yaw, self.pitch = 0, 0
-        elif k == Qt.Key.Key_2:
-            self.yaw, self.pitch = -90, 89
-        elif k == Qt.Key.Key_3:
-            self.yaw, self.pitch = 90, 0
+            self.yaw, self.pitch = -141.0, -26.0
         elif k == Qt.Key.Key_0:
-            self.yaw, self.pitch = 35, 22
+            self.yaw, self.pitch = -141.0, -26.0
         self.update()
 
+    def keyReleaseEvent(self, ev):
+        self._keys.discard(ev.key())
+
     def reset_view(self):
-        self.yaw, self.pitch, self.dist = 35.0, 22.0, 18.0
-        self.target = [0.0, 0.0, 0.0]
-        self.ortho = False
+        self.pos = [14.0, 11.0, 9.0]
+        self.yaw = -141.0
+        self.pitch = -26.0
+        self._vel = [0.0, 0.0, 0.0]
+        self._move_timer.stop()
         self.update()
 
     def _try_pick(self, pos):

@@ -45,11 +45,14 @@ Yêu cầu: Python 3.10+, PyQt6, PyOpenGL, numpy. Khuyến nghị có GPU/OpenGL
 
 | Chuột / phím | Chức năng |
 |---|---|
-| Chuột trái kéo | Xoay mô hình 360° |
-| Lăn chuột | Zoom |
-| Chuột phải kéo | Di chuyển (pan) |
 | Click điểm | Chọn điểm (đồng bộ với cây Layer) |
-| `Home` | Về góc nhìn mặc định |
+| Lăn chuột | Tăng/giảm tốc độ di chuyển |
+| Chuột phải kéo | Di chuyển ngang/dọc |
+| `W` / `S` | Tiến / Lùi |
+| `A` / `D` | Sang trái / Sang phải |
+| `Space` / `Ctrl` | Lên / Xuống |
+| `Shift` | Chạy nhanh (giữ) |
+| `Home` | Về vị trí & góc nhìn mặc định |
 | `1` / `2` / `3` | Nhìn từ trước / trên / phải |
 | `5` | Bật/tắt phối cảnh song song (ortho) |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / Redo |
