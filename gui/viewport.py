@@ -302,9 +302,9 @@ class Viewport(QOpenGLWidget):
         if Qt.Key.Key_S in self._keys:
             tvx -= fx * speed; tvy -= fy * speed
         if Qt.Key.Key_A in self._keys:
-            tvx -= rx * speed; tvy -= ry * speed
-        if Qt.Key.Key_D in self._keys:
             tvx += rx * speed; tvy += ry * speed
+        if Qt.Key.Key_D in self._keys:
+            tvx -= rx * speed; tvy -= ry * speed
         if Qt.Key.Key_Space in self._keys:
             tvz += speed
         if Qt.Key.Key_Control in self._keys:
@@ -333,8 +333,7 @@ class Viewport(QOpenGLWidget):
             self.selected_id = picked or None
             self.objectClicked.emit(picked or "")
             self.update()
-        elif ev.button() == Qt.MouseButton.RightButton:
-            self._mode = "pan"
+        # Chuot phai: khong lam gi (theo yeu cau)
 
     def mouseMoveEvent(self, ev):
         if self._last is None:
@@ -361,9 +360,8 @@ class Viewport(QOpenGLWidget):
         self._mode = None
 
     def wheelEvent(self, ev):
-        d = ev.angleDelta().y()
-        self.move_speed = max(2.0, min(60.0, self.move_speed * (1.15 if d > 0 else 0.87)))
-        self.update()
+        # Tat zoom / doi toc do bang banh xe (theo yeu cau)
+        ev.accept()
 
     def keyPressEvent(self, ev):
         k = ev.key()
