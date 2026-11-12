@@ -1,38 +1,78 @@
 """Cua so chinh: toolbar, cay layer, panel thuoc tinh, undo/redo, animation."""
+from __future__ import annotations
+
+import math
 import os
 import random
 
+import numpy as np
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QAction, QColor
-from PyQt6.QtWidgets import (QColorDialog, QDockWidget, QDoubleSpinBox, QFileDialog,
-                             QHBoxLayout, QInputDialog, QLabel, QMainWindow,
-                             QMessageBox, QPushButton, QSlider, QToolBar, QTreeWidget,
-                             QTreeWidgetItem, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (
+    QColorDialog,
+    QDockWidget,
+    QDoubleSpinBox,
+    QFileDialog,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QSlider,
+    QToolBar,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
-from core.generators import (gen_angle, gen_box, gen_cone, gen_cube, gen_cylinder,
-                             gen_distance, gen_divide, gen_midpoint, gen_on_segment,
-                             gen_pyramid, gen_prism, gen_sphere, gen_symmetric)
-from core.scene import Obj, Scene
+from core.builders import (
+    gen_angle,
+    gen_box,
+    gen_cone,
+    gen_cube,
+    gen_cylinder,
+    gen_distance,
+    gen_divide,
+    gen_face,
+    gen_midpoint,
+    gen_on_segment,
+    gen_point,
+    gen_prism,
+    gen_pyramid,
+    gen_segment,
+    gen_sphere,
+    gen_symmetric,
+)
+from core.scene import Scene
 from gui.dialogs import AddPointDialog, CreateSolidDialog
 from gui.viewport import Viewport
 
 GROUPS = ["Điểm", "Đoạn thẳng", "Mặt", "Khối", "Mặt cong", "Số đo", "Khác"]
 GROUP_MAP = {
-    "Points": "Điểm", "Segments": "Đoạn thẳng", "Faces": "Mặt",
-    "Solids": "Khối", "Surfaces": "Mặt cong", "Measures": "Số đo",
+    "Points": "Điểm",
+    "Segments": "Đoạn thẳng",
+    "Faces": "Mặt",
+    "Solids": "Khối",
+    "Surfaces": "Mặt cong",
+    "Measures": "Số đo",
     "Other": "Khác",
 }
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("GeoSpace 3D - Demo")
+        self.setWindowTitle("GeoSpace 3D")
         self.resize(1320, 820)
         self.scene = Scene()
         self.scene.on_change(self._on_scene_changed)
-        self.current_file = None
-        self._refreshing = False
+        self.current_file: str | None = None
+        self._refreshing: bool = False
+        self._rotate_on: bool = False
+        self._anim_on: bool = False
 
         self.viewport = Viewport()
         self.viewport.set_scene(self.scene)
@@ -46,21 +86,21 @@ class MainWindow(QMainWindow):
         self._refresh_tree()
         self.statusBar().showMessage(
             "Chuột trái: xoay 360° | Lăn chuột: zoom | Chuột phải: pan | "
-            "Home: reset | 5: phối cảnh song song")
-        # Hinh khoi tao: chop S.ABCD + M, N trung diem + doan MN
+            "Mũi tên: xoay góc nhìn | Home: reset | 5: phối cảnh song song"
+        )
         self.load_sample()
 
     # ---------------- toolbar ----------------
-    def _build_toolbar(self):
-        # Hai hang de hien du cac nut
+    def _build_toolbar(self) -> None:
         tb = QToolBar("Công cụ 1")
         tb.setMovable(False)
         self.addToolBar(tb)
+
         tb2 = QToolBar("Công cụ 2")
         tb2.setMovable(False)
         self.addToolBar(tb2)
 
-        def act(bar, name, cb, sc=None):
+        def act(bar: QToolBar, name: str, cb, sc: str | None = None) -> QAction:
             a = QAction(name, self)
             if sc:
                 a.setShortcut(sc)
@@ -68,7 +108,7 @@ class MainWindow(QMainWindow):
             bar.addAction(a)
             return a
 
-        # Hang 1: file + undo/redo + cong cu diem
+        # Hang 1: file + undo/redo + cong cu diem/doan/mat
         act(tb, "Mới", self.new_project, "Ctrl+N")
         act(tb, "Mở", self.open_project, "Ctrl+O")
         act(tb, "Lưu", self.save_project, "Ctrl+S")
@@ -97,13 +137,19 @@ class MainWindow(QMainWindow):
         act(tb2, "Khoảng cách", self.add_distance)
         act(tb2, "Góc", self.add_angle)
         tb2.addSeparator()
+
         self.act_rotate = QAction("Tự xoay", self)
         self.act_rotate.setCheckable(True)
         self.act_rotate.triggered.connect(self.toggle_rotate)
         tb2.addAction(self.act_rotate)
 
+        self.act_anim = QAction("Chạy điểm", self)
+        self.act_anim.setCheckable(True)
+        self.act_anim.triggered.connect(self.toggle_anim)
+        tb2.addAction(self.act_anim)
+
     # ---------------- docks ----------------
-    def _build_docks(self):
+    def _build_docks(self) -> None:
         dw = QDockWidget("Quản lý đối tượng", self)
         dw.setMinimumWidth(280)
         self.tree = QTreeWidget()
@@ -142,7 +188,7 @@ class MainWindow(QMainWindow):
 
         self.coord_box = QWidget()
         cv = QVBoxLayout(self.coord_box)
-        self.spins = []
+        self.spins: list[QDoubleSpinBox] = []
         for axis in ("X", "Y", "Z"):
             r = QHBoxLayout()
             r.addWidget(QLabel(axis))
@@ -158,7 +204,7 @@ class MainWindow(QMainWindow):
 
         self.t_box = QWidget()
         tv = QVBoxLayout(self.t_box)
-        tv.addWidget(QLabel("t (diem chay tren canh)"))
+        tv.addWidget(QLabel("t (điểm chạy trên cạnh)"))
         self.sl_t = QSlider(Qt.Orientation.Horizontal)
         self.sl_t.setRange(0, 1000)
         self.sl_t.setValue(500)
@@ -171,32 +217,33 @@ class MainWindow(QMainWindow):
         dw2.setWidget(w)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dw2)
 
-    def _build_anim(self):
+    def _build_anim(self) -> None:
         self.timer = QTimer(self)
         self.timer.setInterval(40)
         self.timer.timeout.connect(self._tick)
         self._phase = 0.0
 
     # ---------------- selection / refresh ----------------
-    def _selected_id(self):
+    def _selected_id(self) -> str | None:
         it = self.tree.currentItem()
         if it is None:
             return None
         return it.data(0, Qt.ItemDataRole.UserRole)
 
-    def _on_scene_changed(self, ids):
+    def _on_scene_changed(self, ids: list[str]) -> None:
         self._refresh_tree()
         self.viewport.update()
         sel = self._selected_id()
         if sel and sel in self.scene.objects:
             self._load_props(sel)
 
-    def _refresh_tree(self):
+    def _refresh_tree(self) -> None:
         prev = self._selected_id()
         self._refreshing = True
         self.tree.blockSignals(True)
         self.tree.clear()
-        groups = {}
+
+        groups: dict[str, QTreeWidgetItem] = {}
         for g in GROUPS:
             item = QTreeWidgetItem([g, ""])
             item.setExpanded(True)
@@ -205,29 +252,32 @@ class MainWindow(QMainWindow):
             item.setFont(0, f)
             self.tree.addTopLevelItem(item)
             groups[g] = item
+
         for o in self.scene.objects.values():
             g = GROUP_MAP.get(o.group, "Khác")
             it = QTreeWidgetItem([o.name, o.kind])
             it.setData(0, Qt.ItemDataRole.UserRole, o.id)
             it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            it.setCheckState(0, Qt.CheckState.Checked if o.visible
-                             else Qt.CheckState.Unchecked)
+            it.setCheckState(
+                0, Qt.CheckState.Checked if o.visible else Qt.CheckState.Unchecked
+            )
             it.setForeground(0, QColor.fromRgbF(*o.color[:3]))
             groups[g].addChild(it)
+
         self.tree.expandAll()
         self.tree.blockSignals(False)
         self._refreshing = False
         if prev and prev in self.scene.objects:
             self._select_tree_item(prev)
 
-    def _on_tree_select(self):
+    def _on_tree_select(self) -> None:
         oid = self._selected_id()
         self.viewport.selected_id = oid
         self.viewport.update()
         if oid:
             self._load_props(oid)
 
-    def _on_item_changed(self, item, col):
+    def _on_item_changed(self, item: QTreeWidgetItem, col: int) -> None:
         if self._refreshing or col != 0:
             return
         oid = item.data(0, Qt.ItemDataRole.UserRole)
@@ -236,25 +286,26 @@ class MainWindow(QMainWindow):
         vis = item.checkState(0) == Qt.CheckState.Checked
         o = self.scene.objects[oid]
         if o.visible != vis:
-            # KHONG rebuild cay ngay trong signal itemChanged (Qt se xoa item
-            # dang duoc xu ly). Chi cap nhat scene + viewport.
             self.scene._push()
             o.visible = vis
             self.scene.evaluate()
             self.viewport.update()
             self.statusBar().showMessage(
-                f"{'Hien' if vis else 'An'}: {o.name}", 2000)
+                f"{'Hiện' if vis else 'Ẩn'}: {o.name}", 2000
+            )
 
-    def _load_props(self, oid):
+    def _load_props(self, oid: str) -> None:
         o = self.scene.objects.get(oid)
         if not o:
             return
         self.prop_name.setText(f"<b>{o.name}</b> &nbsp;({o.kind})&nbsp; [{o.id}]")
         self.btn_vis.setText("Ẩn" if o.visible else "Hiện")
+
         self.sl_alpha.blockSignals(True)
-        self.sl_alpha.setValue(int(255 * (o.color[3] if len(o.color) > 3 else 1.0) / 2.55))
+        self.sl_alpha.setValue(int(round(o.color[3] * 100)))
         self.sl_alpha.blockSignals(False)
-        if o.kind == "point" and o.ctor == "fixed":
+
+        if o.kind == "point" and o.ctor == "fixed" and isinstance(o.value, np.ndarray):
             self.coord_box.show()
             for i in range(3):
                 self.spins[i].blockSignals(True)
@@ -262,15 +313,16 @@ class MainWindow(QMainWindow):
                 self.spins[i].blockSignals(False)
         else:
             self.coord_box.hide()
+
         if o.kind == "point" and o.ctor == "on_segment":
             self.t_box.show()
             self.sl_t.blockSignals(True)
-            self.sl_t.setValue(int(float(o.args.get("t", 0.5)) * 1000))
+            self.sl_t.setValue(int(float(o.params.get("t", 0.5)) * 1000))
             self.sl_t.blockSignals(False)
         else:
             self.t_box.hide()
 
-    def _coord_changed(self):
+    def _coord_changed(self) -> None:
         oid = self._selected_id()
         if not oid:
             return
@@ -278,52 +330,49 @@ class MainWindow(QMainWindow):
         if not o or o.kind != "point" or o.ctor != "fixed":
             return
         xyz = [self.spins[i].value() for i in range(3)]
-        o.args = {"xyz": xyz}
-        self.scene.update(oid, args={"xyz": xyz})
+        self.scene.update(oid, params={"xyz": xyz})
 
-    def _t_changed(self):
+    def _t_changed(self) -> None:
         oid = self._selected_id()
         if not oid:
             return
         o = self.scene.objects.get(oid)
         if not o or o.ctor != "on_segment":
             return
-        o.args["t"] = self.sl_t.value() / 1000.0
+        o.params["t"] = self.sl_t.value() / 1000.0
         self.scene._notify([oid])
 
-    def _alpha_changed(self, val):
+    def _alpha_changed(self, val: int) -> None:
         oid = self._selected_id()
         if not oid:
             return
         o = self.scene.objects[oid]
-        c = list(o.color)
-        while len(c) < 4:
-            c.append(1.0)
-        c[3] = val / 100.0
-        self.scene.update(oid, history=False, color=tuple(c))
+        r, g, b, _ = o.color
+        self.scene.update(oid, history=False, color=(r, g, b, val / 100.0))
 
-    def toggle_visible(self):
+    def toggle_visible(self) -> None:
         oid = self._selected_id()
         if not oid:
             return
         o = self.scene.objects[oid]
         self.scene.update(oid, visible=not o.visible)
 
-    def change_color(self):
+    def change_color(self) -> None:
         oid = self._selected_id()
         if not oid:
             return
         o = self.scene.objects[oid]
         c = QColorDialog.getColor(QColor.fromRgbF(*o.color[:3]))
         if c.isValid():
-            alpha = o.color[3] if len(o.color) > 3 else 1.0
-            self.scene.update(oid, color=(c.redF(), c.greenF(), c.blueF(), alpha))
+            self.scene.update(
+                oid, color=(c.redF(), c.greenF(), c.blueF(), o.color[3])
+            )
 
-    def _on_viewport_click(self, oid):
+    def _on_viewport_click(self, oid: str) -> None:
         if oid:
             self._select_tree_item(oid)
 
-    def _select_tree_item(self, oid):
+    def _select_tree_item(self, oid: str) -> None:
         for i in range(self.tree.topLevelItemCount()):
             parent = self.tree.topLevelItem(i)
             for j in range(parent.childCount()):
@@ -333,7 +382,7 @@ class MainWindow(QMainWindow):
                     return
 
     # ---------------- context menu ----------------
-    def _tree_menu(self, pos):
+    def _tree_menu(self, pos) -> None:
         it = self.tree.itemAt(pos)
         if it is None:
             return
@@ -341,95 +390,87 @@ class MainWindow(QMainWindow):
         if not oid:
             return
         self.tree.setCurrentItem(it)
-        from PyQt6.QtWidgets import QMenu
         m = QMenu(self)
-        m.addAction("Rename", lambda: self.rename_object(oid))
-        m.addAction("Color", self.change_color)
-        m.addAction("Hide/Show", self.toggle_visible)
+        m.addAction("Đổi tên", lambda: self.rename_object(oid))
+        m.addAction("Màu sắc", self.change_color)
+        m.addAction("Ẩn / Hiện", self.toggle_visible)
         m.addSeparator()
-        m.addAction("Delete", self.delete_selected)
+        m.addAction("Xóa", self.delete_selected)
         m.exec(self.tree.viewport().mapToGlobal(pos))
 
-    def rename_object(self, oid):
+    def rename_object(self, oid: str) -> None:
         o = self.scene.objects[oid]
-        name, ok = QInputDialog.getText(self, "Rename", "Ten moi:", text=o.name)
+        name, ok = QInputDialog.getText(self, "Đổi tên", "Tên mới:", text=o.name)
         if ok and name.strip():
             self.scene.update(oid, name=name.strip())
 
     # ---------------- actions ----------------
-    def add_point(self):
+    def add_point(self) -> None:
         dlg = AddPointDialog(self)
         if dlg.exec():
             name, xyz = dlg.get()
-            oid = self.scene.new_id("p")
-            self.scene.add(Obj(oid, "point", name, "fixed", {"xyz": list(xyz)},
-                               group="Points"))
+            gen_point(self.scene, name, xyz)
 
-    def add_midpoint(self):
+    def add_midpoint(self) -> None:
         ids = self._ask_points(2, "Chọn 2 điểm để lấy trung điểm")
         if not ids:
             return
         name, ok = QInputDialog.getText(
-            self, "Tên trung điểm", "Đặt tên (để trống = tự đặt):", text="")
+            self, "Tên trung điểm", "Đặt tên (để trống = tự đặt):", text=""
+        )
         name = name.strip() if ok and name.strip() else None
         gen_midpoint(self.scene, ids[0], ids[1], name=name)
 
-    def add_on_segment(self):
+    def add_on_segment(self) -> None:
         ids = self._ask_points(2, "Chọn 2 điểm (điểm chạy trên đoạn)")
         if not ids:
             return
         t = random.uniform(0.15, 0.85)
         gen_on_segment(self.scene, ids[0], ids[1], t=t)
 
-    def add_divide(self):
+    def add_divide(self) -> None:
         ids = self._ask_points(2, "Chọn A, B để chia đoạn")
         if not ids:
             return
-        m, ok = QInputDialog.getInt(self, "Ti le", "AM:MB = m:n, nhap m:", 1, 1, 100)
+        m, ok = QInputDialog.getInt(self, "Tỉ lệ", "AM:MB = m:n, nhập m:", 1, 1, 100)
         if not ok:
             return
-        n, ok = QInputDialog.getInt(self, "Ti le", "nhap n:", 1, 1, 100)
+        n, ok = QInputDialog.getInt(self, "Tỉ lệ", "Nhập n:", 1, 1, 100)
         if not ok:
             return
         gen_divide(self.scene, ids[0], ids[1], m, n)
 
-    def add_symmetry(self):
+    def add_symmetry(self) -> None:
         ids = self._ask_points(2, "Chọn điểm A và tâm đối xứng O")
         if ids:
             gen_symmetric(self.scene, ids[0], ids[1])
 
-    def add_segment(self):
+    def add_segment(self) -> None:
         ids = self._ask_points(2, "Chọn 2 điểm để vẽ đoạn thẳng")
-        if not ids:
-            return
-        a, b = ids
-        nm = self.scene.objects[a].name + self.scene.objects[b].name
-        oid = self.scene.new_id("s")
-        self.scene.add(Obj(oid, "segment", nm, "segment", {"a": a, "b": b},
-                           group="Segments"))
+        if ids:
+            gen_segment(self.scene, ids[0], ids[1])
 
-    def add_face(self):
+    def add_face(self) -> None:
         names = QInputDialog.getText(
-            self, "Mat phang", "Nhap ten cac diem cach nhau boi dau cach (>=3):")[0].split()
+            self, "Mặt phẳng", "Nhập tên các điểm cách nhau bởi dấu cách (>=3):"
+        )[0].split()
         ids = [self._find_point(n) for n in names]
         if len(ids) < 3 or any(i is None for i in ids):
-            QMessageBox.warning(self, "Loi", "Khong tim thay du 3 diem.")
+            QMessageBox.warning(self, "Lỗi", "Không tìm thấy đủ 3 điểm hợp lệ.")
             return
-        oid = self.scene.new_id("f")
-        self.scene.add(Obj(oid, "face", "".join(names), "face", {"pts": ids},
-                           color=(0.5, 0.7, 1.0, 0.35), group="Faces"))
+        gen_face(self.scene, [i for i in ids if i is not None], name="".join(names))
 
-    def add_distance(self):
+    def add_distance(self) -> None:
         ids = self._ask_points(2, "Chọn 2 điểm để đo khoảng cách")
         if ids:
             gen_distance(self.scene, ids[0], ids[1])
 
-    def add_angle(self):
+    def add_angle(self) -> None:
         ids = self._ask_points(3, "Chọn A, đỉnh B, C để đo góc ∠ABC")
         if ids:
             gen_angle(self.scene, ids[0], ids[1], ids[2])
 
-    def create_solid(self, kind):
+    def create_solid(self, kind: str) -> None:
         dlg = CreateSolidDialog(self, kind)
         if not dlg.exec():
             return
@@ -449,55 +490,54 @@ class MainWindow(QMainWindow):
         elif kind == "sphere":
             gen_sphere(self.scene, p["A"], p["side"])
 
-    def delete_selected(self):
+    def delete_selected(self) -> None:
         oid = self._selected_id()
         if not oid:
             return
         removed = self.scene.remove(oid)
         if len(removed) > 1:
             QMessageBox.information(
-                self, "Xoa", f"Da xoa {len(removed)} doi tuong (kem phu thuoc).")
+                self, "Xóa", f"Đã xóa {len(removed)} đối tượng (kèm phụ thuộc)."
+            )
 
     # ---------------- animation ----------------
-    def toggle_rotate(self):
-        self._rotate_on = getattr(self, "_rotate_on", False)
+    def toggle_rotate(self) -> None:
         self._rotate_on = self.act_rotate.isChecked()
         self._sync_timer()
 
-    def toggle_anim(self):
+    def toggle_anim(self) -> None:
         self._anim_on = self.act_anim.isChecked()
         self._sync_timer()
 
-    def _sync_timer(self):
-        if getattr(self, "_rotate_on", False) or getattr(self, "_anim_on", False):
+    def _sync_timer(self) -> None:
+        if self._rotate_on or self._anim_on:
             self.timer.start()
         else:
             self.timer.stop()
 
-    def _tick(self):
-        import math
+    def _tick(self) -> None:
         self._phase += 0.06
-        if getattr(self, "_rotate_on", False):
+        if self._rotate_on:
             self.viewport.yaw += 0.6
-        if getattr(self, "_anim_on", False):
+        if self._anim_on:
             for o in self.scene.objects.values():
                 if o.ctor == "on_segment":
-                    o.args["t"] = 0.5 + 0.5 * math.sin(self._phase)
+                    o.params["t"] = 0.5 + 0.5 * math.sin(self._phase)
             self.scene.evaluate()
         self.viewport.update()
 
     # ---------------- file ----------------
-    def new_project(self):
+    def new_project(self) -> None:
         self.scene = Scene()
         self.scene.on_change(self._on_scene_changed)
         self.viewport.set_scene(self.scene)
         self.current_file = None
-        self.setWindowTitle("GeoSpace 3D - Demo")
+        self.setWindowTitle("GeoSpace 3D")
         self._refresh_tree()
         self.viewport.update()
 
-    def open_project(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Mo", "", "JSON (*.json)")
+    def open_project(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Mở", "", "JSON (*.json)")
         if not path:
             return
         self.scene = Scene.load(path)
@@ -508,59 +548,58 @@ class MainWindow(QMainWindow):
         self._refresh_tree()
         self.viewport.update()
 
-    def save_project(self):
+    def save_project(self) -> None:
         if not self.current_file:
-            path, _ = QFileDialog.getSaveFileName(self, "Luu", "bai1.json", "JSON (*.json)")
+            path, _ = QFileDialog.getSaveFileName(self, "Lưu", "bai1.json", "JSON (*.json)")
             if not path:
                 return
             self.current_file = path
         self.scene.save(self.current_file)
-        self.statusBar().showMessage(f"Da luu: {self.current_file}", 4000)
+        self.statusBar().showMessage(f"Đã lưu: {self.current_file}", 4000)
         self.setWindowTitle(f"GeoSpace 3D - {os.path.basename(self.current_file)}")
 
-    def export_png(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Xuat PNG", "hinh.json.png", "PNG (*.png)")
+    def export_png(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(self, "Xuất PNG", "hinh.png", "PNG (*.png)")
         if not path:
             return
         self.viewport.repaint()
         img = self.viewport.grabFramebuffer()
         img.save(path)
-        self.statusBar().showMessage(f"Da xuat: {path}", 4000)
+        self.statusBar().showMessage(f"Đã xuất: {path}", 4000)
 
-    def do_undo(self):
+    def do_undo(self) -> None:
         if not self.scene.undo():
-            self.statusBar().showMessage("Khong con gi de undo", 2000)
+            self.statusBar().showMessage("Không còn gì để undo", 2000)
 
-    def do_redo(self):
+    def do_redo(self) -> None:
         if not self.scene.redo():
-            self.statusBar().showMessage("Khong con gi de redo", 2000)
+            self.statusBar().showMessage("Không còn gì để redo", 2000)
 
     # ---------------- sample ----------------
-    def load_sample(self):
+    def load_sample(self) -> None:
         self.new_project()
         pts = gen_pyramid(self.scene, 4.0, 5.0)["points"]
         A, B, C, D, S = pts
         M = gen_midpoint(self.scene, S, A, name="M")
         N = gen_midpoint(self.scene, S, C, name="N")
-        nm = self.scene.objects[M].name + self.scene.objects[N].name
-        oid = self.scene.new_id("s")
-        self.scene.add(Obj(oid, "segment", nm, "segment", {"a": M, "b": N},
-                           color=(1.0, 0.8, 0.2), group="Segments"))
+        gen_segment(self.scene, M, N, color=(1.0, 0.8, 0.2, 1.0))
         gen_distance(self.scene, M, N)
         self.statusBar().showMessage(
-            "Mau: chop S.ABCD + M,N la trung diem SA,SC + doan MN", 6000)
+            "Mẫu: chóp S.ABCD + M, N là trung điểm SA, SC + đoạn MN", 6000
+        )
 
     # ---------------- helpers ----------------
-    def _ask_points(self, n, title):
+    def _ask_points(self, n: int, title: str) -> list[str] | None:
         names = QInputDialog.getText(
-            self, title, f"Nhap ten {n} diem cach nhau boi dau cach:")[0].split()
+            self, title, f"Nhập tên {n} điểm cách nhau bởi dấu cách:"
+        )[0].split()
         ids = [self._find_point(x) for x in names]
         if len(ids) != n or any(i is None for i in ids):
-            QMessageBox.warning(self, "Loi", f"Can dung {n} diem hop le.")
+            QMessageBox.warning(self, "Lỗi", f"Cần đúng {n} điểm hợp lệ.")
             return None
-        return ids
+        return [i for i in ids if i is not None]
 
-    def _find_point(self, name):
+    def _find_point(self, name: str) -> str | None:
         for o in self.scene.objects.values():
             if o.kind == "point" and o.name == name:
                 return o.id

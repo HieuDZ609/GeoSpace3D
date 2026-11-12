@@ -1,44 +1,32 @@
 """Mo hinh du lieu hinh hoc + do thi phu thuoc (DAG) + undo/redo."""
-import json
+from __future__ import annotations
+
+from collections import deque
 from contextlib import contextmanager
+import json
+from typing import Any, Callable
 
 import numpy as np
 
-from core.math3d import V, normal_of_points, angle_between
+from core.geometry import (
+    FaceModel,
+    GeomValue,
+    MeasureData,
+    Node,
+    PlaneData,
+    SegmentData,
+    SolidModel,
+    WireFrame,
+)
+from core.math3d import angle_between, normal_of_points, unit, vec3
+from core.primitives import build_cone, build_cylinder, build_sphere
 
 
-class Obj:
-    def __init__(self, oid, kind, name, ctor, args=None, color=(0.9, 0.9, 0.9),
-                 visible=True, group=""):
-        self.id = oid
-        self.kind = kind          # point/segment/line/face/solid/surface/measure
-        self.name = name
-        self.ctor = ctor
-        self.args = args or {}
-        self.color = tuple(color)
-        self.visible = visible
-        self.group = group
-        self.value = None
-        self.error = None
+def _collect_refs(params: Any, scene_objects: dict[str, Node]) -> list[str]:
+    """Quet de quy tat ca ID doi tuong duoc tham chieu trong params."""
+    refs: list[str] = []
 
-    def to_dict(self):
-        return {
-            "id": self.id, "kind": self.kind, "name": self.name,
-            "ctor": self.ctor, "args": self.args, "color": list(self.color),
-            "visible": self.visible, "group": self.group,
-        }
-
-    @staticmethod
-    def from_dict(d):
-        return Obj(d["id"], d["kind"], d["name"], d["ctor"], d.get("args", {}),
-                   tuple(d.get("color", [0.9, 0.9, 0.9])),
-                   d.get("visible", True), d.get("group", ""))
-
-
-def _collect_refs(args, scene_objects):
-    refs = []
-
-    def walk(x):
+    def walk(x: Any) -> None:
         if isinstance(x, str):
             if x in scene_objects:
                 refs.append(x)
@@ -49,26 +37,26 @@ def _collect_refs(args, scene_objects):
             for y in x.values():
                 walk(y)
 
-    walk(args)
+    walk(params)
     return refs
 
 
 class Scene:
-    def __init__(self):
-        self.objects = {}        # id -> Obj
-        self._counter = 0
-        self.listeners = []
-        self._history = []
-        self._redo = []
-        self._in_batch = False
+    def __init__(self) -> None:
+        self.objects: dict[str, Node] = {}
+        self._counter: int = 0
+        self.listeners: list[Callable[[list[str]], None]] = []
+        self._history: list[dict[str, Any]] = []
+        self._redo: list[dict[str, Any]] = []
+        self._in_batch: bool = False
 
-    # ---------- id ----------
-    def new_id(self, prefix="o"):
+    # ---------- ID ----------
+    def new_id(self, prefix: str = "o") -> str:
         self._counter += 1
         return f"{prefix}{self._counter}"
 
-    # ---------- history ----------
-    def _push(self):
+    # ---------- History (Undo / Redo) ----------
+    def _push(self) -> None:
         if self._in_batch:
             return
         self._history.append(self.to_dict())
@@ -86,27 +74,29 @@ class Scene:
             self._in_batch = False
             self._notify(list(self.objects.keys()))
 
-    def undo(self):
+    def undo(self) -> bool:
         if not self._history:
             return False
         self._redo.append(self.to_dict())
         self._restore(self._history.pop())
         return True
 
-    def redo(self):
+    def redo(self) -> bool:
         if not self._redo:
             return False
         self._history.append(self.to_dict())
         self._restore(self._redo.pop())
         return True
 
-    def _restore(self, d):
-        self.objects = {od["id"]: Obj.from_dict(od) for od in d.get("objects", [])}
+    def _restore(self, data: dict[str, Any]) -> None:
+        self.objects = {
+            od["id"]: Node.from_dict(od) for od in data.get("objects", [])
+        }
         self._recompute_counter()
         self.evaluate()
         self._notify(list(self.objects.keys()))
 
-    def _recompute_counter(self):
+    def _recompute_counter(self) -> None:
         mx = 0
         for oid in self.objects:
             num = "".join(ch for ch in oid if ch.isdigit())
@@ -115,14 +105,14 @@ class Scene:
         self._counter = mx
 
     # ---------- CRUD ----------
-    def add(self, obj):
+    def add(self, node: Node) -> Node:
         self._push()
-        self.objects[obj.id] = obj
-        self._notify([obj.id])
-        return obj
+        self.objects[node.id] = node
+        self._notify([node.id])
+        return node
 
-    def remove(self, oid):
-        """Xoa object + cascade cac object phu thuoc."""
+    def remove(self, oid: str) -> list[str]:
+        """Xoa object + xoa day chuyen cac object con phu thuoc."""
         self._push()
         to_remove = [oid]
         i = 0
@@ -130,9 +120,9 @@ class Scene:
             cur = to_remove[i]
             i += 1
             for o in self.objects.values():
-                if cur in _collect_refs(o.args, self.objects) and o.id not in to_remove:
+                if cur in _collect_refs(o.params, self.objects) and o.id not in to_remove:
                     to_remove.append(o.id)
-        removed = []
+        removed: list[str] = []
         for rid in to_remove:
             if rid in self.objects:
                 del self.objects[rid]
@@ -140,37 +130,38 @@ class Scene:
         self._notify(removed)
         return removed
 
-    def update(self, oid, history=True, **kw):
-        o = self.objects[oid]
+    def update(self, oid: str, history: bool = True, **kw: Any) -> None:
+        node = self.objects[oid]
         if history:
             self._push()
         for k, v in kw.items():
-            setattr(o, k, v)
+            setattr(node, k, v)
         self._notify([oid])
 
-    def get(self, oid):
+    def get(self, oid: str) -> Node | None:
         return self.objects.get(oid)
 
-    # ---------- dependency ----------
-    def refs_of(self, oid):
-        return _collect_refs(self.objects[oid].args, self.objects)
+    # ---------- Dependency Graph (DAG) ----------
+    def refs_of(self, oid: str) -> list[str]:
+        return _collect_refs(self.objects[oid].params, self.objects)
 
-    def dependents(self, oid):
-        return [o.id for o in self.objects.values()
-                if oid in _collect_refs(o.args, self.objects)]
+    def dependents(self, oid: str) -> list[str]:
+        return [
+            o.id for o in self.objects.values()
+            if oid in _collect_refs(o.params, self.objects)
+        ]
 
-    def topo_order(self):
+    def topo_order(self) -> list[str]:
         ids = list(self.objects.keys())
         indeg = {i: 0 for i in ids}
-        adj = {i: [] for i in ids}
+        adj: dict[str, list[str]] = {i: [] for i in ids}
         for oid in ids:
             for r in self.refs_of(oid):
                 if r in indeg:
                     adj[r].append(oid)
                     indeg[oid] += 1
-        from collections import deque
         q = deque([i for i in ids if indeg[i] == 0])
-        order = []
+        order: list[str] = []
         while q:
             cur = q.popleft()
             order.append(cur)
@@ -180,196 +171,162 @@ class Scene:
                     q.append(nxt)
         for i in ids:
             if i not in order:
-                order.append(i)          # co chu trinh -> van ve duoc
+                order.append(i)
         return order
 
-    # ---------- evaluate ----------
-    def evaluate(self):
+    # ---------- Evaluate ----------
+    def evaluate(self) -> None:
         for oid in self.topo_order():
-            o = self.objects[oid]
-            o.error = None
+            node = self.objects[oid]
+            node.error = None
             try:
-                o.value = self._eval(o)
+                node.value = self._eval(node)
             except Exception as e:
-                o.value = None
-                o.error = str(e)
+                node.value = None
+                node.error = str(e)
 
-    def _eval(self, o):
-        c = o.ctor
+    def _resolve_vec3(self, v: Any) -> np.ndarray:
+        if isinstance(v, str):
+            val = self.objects[v].value
+            if not isinstance(val, np.ndarray):
+                raise ValueError(f"Doi tuong '{v}' khong phai toa do diem")
+            return val
+        return np.asarray(v, dtype=np.float64)
+
+    def _eval(self, node: Node) -> GeomValue:
+        c = node.ctor
+        p = node.params
         g = self.objects
+
         if c == "fixed":
-            return V(*o.args["xyz"])
+            return vec3(*p["xyz"])
+
         if c == "affine":
-            acc = np.zeros(3)
-            for coef, ref in o.args["terms"]:
-                acc = acc + float(coef) * np.asarray(g[ref].value, float)
+            acc = np.zeros(3, dtype=np.float64)
+            for coef, ref in p["terms"]:
+                acc = acc + float(coef) * np.asarray(g[ref].value, dtype=np.float64)
             return acc
+
         if c == "on_segment":
-            a = np.asarray(g[o.args["a"]].value, float)
-            b = np.asarray(g[o.args["b"]].value, float)
-            t = float(o.args.get("t", 0.5))
+            a = np.asarray(g[p["a"]].value, dtype=np.float64)
+            b = np.asarray(g[p["b"]].value, dtype=np.float64)
+            t = float(p.get("t", 0.5))
             return a + t * (b - a)
+
         if c in ("segment", "line"):
-            a = np.asarray(g[o.args["a"]].value, float)
-            b = np.asarray(g[o.args["b"]].value, float)
-            return (a, b)
+            a = np.asarray(g[p["a"]].value, dtype=np.float64)
+            b = np.asarray(g[p["b"]].value, dtype=np.float64)
+            return SegmentData(a=a, b=b)
+
         if c == "plane":
-            pts = [np.asarray(g[p].value, float) for p in o.args["pts"]]
+            pts = [np.asarray(g[pid].value, dtype=np.float64) for pid in p["pts"]]
             nrm = normal_of_points(pts[0], pts[1], pts[2])
             d = -float(np.dot(nrm, pts[0]))
-            return (pts[0], nrm, d)
+            return PlaneData(origin=pts[0], normal=nrm, d=d)
+
         if c == "face":
-            return [np.asarray(g[p].value, float) for p in o.args["pts"]]
+            pts = [np.asarray(g[pid].value, dtype=np.float64) for pid in p["pts"]]
+            verts = np.array(pts, dtype=np.float64)
+            return FaceModel(vertices=verts, faces=[list(range(len(pts)))])
+
         if c == "solid":
-            return o.args
+            faces_ids: list[list[str]] = p["faces"]
+            pt_ids: list[str] = []
+            idx_map: dict[str, int] = {}
+            for face_loop in faces_ids:
+                for pid in face_loop:
+                    if pid not in idx_map:
+                        idx_map[pid] = len(pt_ids)
+                        pt_ids.append(pid)
+            verts = np.array([g[pid].value for pid in pt_ids], dtype=np.float64)
+            faces = [[idx_map[pid] for pid in f] for f in faces_ids]
+            edge_set: set[tuple[int, int]] = set()
+            for f in faces:
+                for i in range(len(f)):
+                    u, v = f[i], f[(i + 1) % len(f)]
+                    edge_set.add((min(u, v), max(u, v)))
+            return SolidModel(
+                face_model=FaceModel(vertices=verts, faces=faces),
+                wireframe=WireFrame(vertices=verts, edges=sorted(edge_set)),
+            )
+
         if c == "cylinder":
-            return _cylinder_value(self, o.args)
+            if "bottom" in p:
+                bottom = self._resolve_vec3(p["bottom"])
+                top = self._resolve_vec3(p["top"])
+            else:
+                bottom = self._resolve_vec3(p["center"])
+                ax = unit(np.asarray(p.get("axis", [0.0, 0.0, 1.0]), dtype=np.float64))
+                top = bottom + float(p["h"]) * ax
+            return build_cylinder(bottom, top, float(p["r"]))
+
         if c == "cone":
-            return _cone_value(self, o.args)
+            if "base" in p:
+                base = self._resolve_vec3(p["base"])
+                apex = self._resolve_vec3(p["apex"])
+            else:
+                base = self._resolve_vec3(p["center"])
+                ax = unit(np.asarray(p.get("axis", [0.0, 0.0, 1.0]), dtype=np.float64))
+                apex = base + float(p["h"]) * ax
+            return build_cone(base, apex, float(p["r"]))
+
         if c == "sphere":
-            return _sphere_value(self, o.args)
+            center = self._resolve_vec3(p["center"])
+            return build_sphere(center, float(p["r"]))
+
         if c == "distance":
-            a = np.asarray(g[o.args["a"]].value, float)
-            b = np.asarray(g[o.args["b"]].value, float)
+            a = np.asarray(g[p["a"]].value, dtype=np.float64)
+            b = np.asarray(g[p["b"]].value, dtype=np.float64)
             d = float(np.linalg.norm(b - a))
-            return {"a": a, "b": b, "text": f"{o.name} = {d:.3f}"}
+            return MeasureData(
+                anchor=(a + b) * 0.5,
+                text=f"{node.name} = {d:.3f}",
+                segment=SegmentData(a=a, b=b),
+            )
+
         if c == "angle":
-            a = np.asarray(g[o.args["a"]].value, float)
-            v = np.asarray(g[o.args["b"]].value, float)
-            cpt = np.asarray(g[o.args["c"]].value, float)
+            a = np.asarray(g[p["a"]].value, dtype=np.float64)
+            v = np.asarray(g[p["b"]].value, dtype=np.float64)
+            cpt = np.asarray(g[p["c"]].value, dtype=np.float64)
             deg = angle_between(a - v, cpt - v)
-            return {"a": a, "b": v, "c": cpt, "text": f"{o.name} = {deg:.1f}°"}
+            return MeasureData(
+                anchor=v,
+                text=f"{node.name} = {deg:.1f}°",
+                segment=None,
+            )
+
         raise ValueError(f"ctor khong ho tro: {c}")
 
-    # ---------- serialize ----------
-    def to_dict(self):
+    # ---------- Serialize (JSON) ----------
+    def to_dict(self) -> dict[str, Any]:
         return {"objects": [o.to_dict() for o in self.objects.values()]}
 
     @classmethod
-    def from_dict(cls, d):
+    def from_dict(cls, data: dict[str, Any]) -> Scene:
         s = cls()
-        for od in d.get("objects", []):
-            s.objects[od["id"]] = Obj.from_dict(od)
+        for od in data.get("objects", []):
+            s.objects[od["id"]] = Node.from_dict(od)
         s._recompute_counter()
         s.evaluate()
         return s
 
-    def save(self, path):
+    def save(self, path: str) -> None:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path: str) -> Scene:
         with open(path, encoding="utf-8") as f:
             return cls.from_dict(json.load(f))
 
-    # ---------- notify ----------
-    def on_change(self, cb):
+    # ---------- Observer ----------
+    def on_change(self, cb: Callable[[list[str]], None]) -> None:
         self.listeners.append(cb)
 
-    def _notify(self, ids):
+    def _notify(self, ids: list[str]) -> None:
         self.evaluate()
         for cb in self.listeners:
             try:
                 cb(ids)
             except Exception:
                 pass
-
-
-# ---------------- mat cong ----------------
-
-def _circle_points(center, r, axis, n):
-    center = np.asarray(center, float)
-    axis = np.asarray(axis, float)
-    axis = axis / (np.linalg.norm(axis) + 1e-12)
-    # 2 vector truc giao
-    tmp = np.array([1.0, 0, 0]) if abs(axis[0]) < 0.9 else np.array([0, 1.0, 0])
-    u = np.cross(axis, tmp); u /= np.linalg.norm(u) + 1e-12
-    v = np.cross(axis, u)
-    pts = []
-    for i in range(n):
-        t = 2 * np.pi * i / n
-        pts.append(center + r * (np.cos(t) * u + np.sin(t) * v))
-    return pts
-
-
-def _resolve(scene, v):
-    if isinstance(v, str):
-        return np.asarray(scene.objects[v].value, float)
-    return np.asarray(v, float)
-
-
-def _cylinder_value(scene, args):
-    if "bottom" in args:
-        bottom = _resolve(scene, args["bottom"])
-        top = _resolve(scene, args["top"])
-    else:
-        bottom = _resolve(scene, args["center"])
-        axis = np.asarray(args.get("axis", [0, 0, 1]), float)
-        axis = axis / (np.linalg.norm(axis) + 1e-12)
-        h = float(args["h"])
-        top = bottom + h * axis
-    r = float(args["r"])
-    axis = top - bottom
-    h = float(np.linalg.norm(axis))
-    axis = axis / (h + 1e-12)
-    n = 32
-    bot = _circle_points(bottom, r, axis, n)
-    top_pts = _circle_points(top, r, axis, n)
-    faces = []
-    for i in range(n):
-        j = (i + 1) % n
-        faces.append([bot[i], bot[j], top_pts[j], top_pts[i]])
-    polylines = [bot + [bot[0]], top_pts + [top_pts[0]]]
-    for i in range(0, n, 4):
-        polylines.append([bot[i], top_pts[i]])
-    return {"faces": faces, "polylines": polylines}
-
-
-def _cone_value(scene, args):
-    if "base" in args:
-        base = _resolve(scene, args["base"])
-        apex = _resolve(scene, args["apex"])
-    else:
-        base = _resolve(scene, args["center"])
-        axis = np.asarray(args.get("axis", [0, 0, 1]), float)
-        axis = axis / (np.linalg.norm(axis) + 1e-12)
-        h = float(args["h"])
-        apex = base + h * axis
-    r = float(args["r"])
-    axis = apex - base
-    h = float(np.linalg.norm(axis))
-    axis = axis / (h + 1e-12)
-    n = 32
-    base_pts = _circle_points(base, r, axis, n)
-    faces = [[base_pts[i], base_pts[(i + 1) % n], apex] for i in range(n)]
-    polylines = [base_pts + [base_pts[0]]]
-    for i in range(0, n, 8):
-        polylines.append([base_pts[i], apex])
-    return {"faces": faces, "polylines": polylines}
-
-
-def _sphere_value(scene, args):
-    c = _resolve(scene, args["center"])
-    r = float(args["r"])
-    n_lat, n_lon = 8, 16
-    lines = []
-    for i in range(1, n_lat):
-        phi = np.pi * i / n_lat
-        ring = []
-        for j in range(n_lon + 1):
-            th = 2 * np.pi * j / n_lon
-            ring.append(c + r * np.array([np.sin(phi) * np.cos(th),
-                                          np.sin(phi) * np.sin(th),
-                                          np.cos(phi)]))
-        lines.append(ring)
-    for j in range(n_lon):
-        th = 2 * np.pi * j / n_lon
-        arc = []
-        for i in range(n_lat + 1):
-            phi = np.pi * i / n_lat
-            arc.append(c + r * np.array([np.sin(phi) * np.cos(th),
-                                         np.sin(phi) * np.sin(th),
-                                         np.cos(phi)]))
-        lines.append(arc)
-    return {"faces": [], "polylines": lines}
