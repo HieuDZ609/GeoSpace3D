@@ -1,4 +1,4 @@
-"""Cua so chinh: toolbar, cay layer, panel thuoc tinh, undo/redo, animation."""
+"""Cua so chinh: toolbar, cay layer, panel thuoc tinh, undo/redo, che do hien thi, animation."""
 from __future__ import annotations
 
 import math
@@ -48,6 +48,7 @@ from core.builders import (
 )
 from core.scene import Scene
 from gui.dialogs import AddPointDialog, CreateSolidDialog
+from gui.side_panel import SidePanel
 from gui.viewport import Viewport
 
 GROUPS = ["Điểm", "Đoạn thẳng", "Mặt", "Khối", "Mặt cong", "Số đo", "Khác"]
@@ -66,7 +67,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("GeoSpace 3D")
-        self.resize(1320, 820)
+        self.resize(1440, 860)
         self.scene = Scene()
         self.scene.on_change(self._on_scene_changed)
         self.current_file: str | None = None
@@ -77,6 +78,7 @@ class MainWindow(QMainWindow):
         self.viewport = Viewport()
         self.viewport.set_scene(self.scene)
         self.viewport.objectClicked.connect(self._on_viewport_click)
+        self.viewport.viewStateChanged.connect(self._sync_view_actions)
         self.setCentralWidget(self.viewport)
         self.viewport.setFocus()
 
@@ -85,73 +87,92 @@ class MainWindow(QMainWindow):
         self._build_anim()
         self._refresh_tree()
         self.statusBar().showMessage(
-            "Chuột trái: xoay 360° | Lăn chuột: zoom | Chuột phải: pan | "
-            "Mũi tên: xoay góc nhìn | Home: reset | 5: phối cảnh song song"
+            "Chuột trái: xoay / chọn điểm, đoạn, mặt | Lăn chuột: zoom | M: đổi chế độ | "
+            "L: khóa gốc O | 5: chiếu song song | Home: reset"
         )
         self.load_sample()
 
     # ---------------- toolbar ----------------
     def _build_toolbar(self) -> None:
-        tb = QToolBar("Công cụ 1")
+        """Thanh cong cu gon: file, undo/redo, che do xem. Cong cu ve nam o panel ben trai."""
+        tb = QToolBar("Công cụ")
         tb.setMovable(False)
         self.addToolBar(tb)
 
-        tb2 = QToolBar("Công cụ 2")
-        tb2.setMovable(False)
-        self.addToolBar(tb2)
-
-        def act(bar: QToolBar, name: str, cb, sc: str | None = None) -> QAction:
+        def act(name: str, cb, sc: str | None = None, tip: str | None = None) -> QAction:
             a = QAction(name, self)
             if sc:
                 a.setShortcut(sc)
+            if tip:
+                a.setToolTip(tip)
             a.triggered.connect(cb)
-            bar.addAction(a)
+            tb.addAction(a)
             return a
 
-        # Hang 1: file + undo/redo + cong cu diem/doan/mat
-        act(tb, "Mới", self.new_project, "Ctrl+N")
-        act(tb, "Mở", self.open_project, "Ctrl+O")
-        act(tb, "Lưu", self.save_project, "Ctrl+S")
-        act(tb, "Xuất ảnh", self.export_png)
+        def toggle(name: str, checked: bool, cb, tip: str | None = None) -> QAction:
+            a = QAction(name, self)
+            a.setCheckable(True)
+            a.setChecked(checked)
+            if tip:
+                a.setToolTip(tip)
+            a.triggered.connect(cb)
+            tb.addAction(a)
+            return a
+
+        act("Mới", self.new_project, "Ctrl+N")
+        act("Mở", self.open_project, "Ctrl+O")
+        act("Lưu", self.save_project, "Ctrl+S")
+        act("Xuất ảnh", self.export_png)
         tb.addSeparator()
-        act(tb, "Hoàn tác", self.do_undo, "Ctrl+Z")
-        act(tb, "Làm lại", self.do_redo, "Ctrl+Y")
+        act("Hoàn tác", self.do_undo, "Ctrl+Z")
+        act("Làm lại", self.do_redo, "Ctrl+Y")
         tb.addSeparator()
-        act(tb, "Điểm", self.add_point)
-        act(tb, "Trung điểm", self.add_midpoint)
-        act(tb, "Điểm trên cạnh", self.add_on_segment)
-        act(tb, "Chia đoạn", self.add_divide)
-        act(tb, "Đối xứng", self.add_symmetry)
-        act(tb, "Đoạn thẳng", self.add_segment)
-        act(tb, "Mặt", self.add_face)
 
-        # Hang 2: khoi + do dac + animation
-        act(tb2, "Lập phương", lambda: self.create_solid("cube"))
-        act(tb2, "Hộp chữ nhật", lambda: self.create_solid("box"))
-        act(tb2, "Hình chóp", lambda: self.create_solid("pyramid"))
-        act(tb2, "Lăng trụ", lambda: self.create_solid("prism"))
-        act(tb2, "Hình trụ", lambda: self.create_solid("cylinder"))
-        act(tb2, "Hình nón", lambda: self.create_solid("cone"))
-        act(tb2, "Hình cầu", lambda: self.create_solid("sphere"))
-        tb2.addSeparator()
-        act(tb2, "Khoảng cách", self.add_distance)
-        act(tb2, "Góc", self.add_angle)
-        tb2.addSeparator()
+        self.act_mode = act("Mặt + Khung", lambda: self.viewport.cycle_display_mode(),
+                            tip="Đổi chế độ hiển thị (phím M)")
+        self.act_lock_origin = toggle("Khóa gốc O", True, lambda c: self.viewport.set_lock_origin(c),
+                                      "Giữ gốc O ở tâm khung nhìn (phím L)")
+        self.act_ortho = toggle("Song song", False, lambda c: self.viewport.set_ortho(c),
+                                "Phép chiếu song song (phím 5)")
+        self.act_plane = toggle("Mặt nền", True, lambda c: self.viewport.set_show_plane(c),
+                                "Hiện / ẩn mặt phẳng Oxy")
+        self.act_grid = toggle("Lưới", False, lambda c: self.viewport.set_show_grid(c),
+                               "Hiện / ẩn lưới ô vuông")
+        tb.addSeparator()
+        self.act_rotate = toggle("Tự xoay", False, lambda _c: self.toggle_rotate())
+        self.act_anim = toggle("Chạy điểm", False, lambda _c: self.toggle_anim())
 
-        self.act_rotate = QAction("Tự xoay", self)
-        self.act_rotate.setCheckable(True)
-        self.act_rotate.triggered.connect(self.toggle_rotate)
-        tb2.addAction(self.act_rotate)
+        # Phim tat Delete: xoa doi tuong dang chon
+        a = QAction(self)
+        a.setShortcut("Delete")
+        a.triggered.connect(self.delete_selected)
+        self.addAction(a)
 
-        self.act_anim = QAction("Chạy điểm", self)
-        self.act_anim.setCheckable(True)
-        self.act_anim.triggered.connect(self.toggle_anim)
-        tb2.addAction(self.act_anim)
+    def _sync_view_actions(self) -> None:
+        self.act_lock_origin.setChecked(self.viewport.lock_origin)
+        self.act_ortho.setChecked(self.viewport.ortho)
+        self.act_plane.setChecked(self.viewport.show_plane)
+        self.act_grid.setChecked(self.viewport.show_grid)
+        labels = {
+            "solid": "Mặt + Khung",
+            "wireframe": "Khung dây",
+            "face": "Chỉ mặt",
+        }
+        self.act_mode.setText("Chế độ: " + labels[self.viewport.display_mode])
 
     # ---------------- docks ----------------
     def _build_docks(self) -> None:
+        # Panel ben trai: So hoc | Hinh hoc | Thong tin
+        self.panel = SidePanel(self)
+        dl = QDockWidget("Công cụ", self)
+        dl.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        dl.setTitleBarWidget(QWidget())          # an thanh tieu de, nhin nhu panel co dinh
+        dl.setMinimumWidth(310)
+        dl.setWidget(self.panel)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dl)
+
         dw = QDockWidget("Quản lý đối tượng", self)
-        dw.setMinimumWidth(280)
+        dw.setMinimumWidth(250)
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Name", "Type"])
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -269,6 +290,9 @@ class MainWindow(QMainWindow):
         self._refreshing = False
         if prev and prev in self.scene.objects:
             self._select_tree_item(prev)
+        panel = getattr(self, "panel", None)
+        if panel is not None:
+            panel.refresh()
 
     def _on_tree_select(self) -> None:
         oid = self._selected_id()
@@ -276,6 +300,9 @@ class MainWindow(QMainWindow):
         self.viewport.update()
         if oid:
             self._load_props(oid)
+        panel = getattr(self, "panel", None)
+        if panel is not None:
+            panel.set_selected(oid)
 
     def _on_item_changed(self, item: QTreeWidgetItem, col: int) -> None:
         if self._refreshing or col != 0:
@@ -460,6 +487,18 @@ class MainWindow(QMainWindow):
             return
         gen_face(self.scene, [i for i in ids if i is not None], name="".join(names))
 
+    def add_face3(self) -> None:
+        ids = self._ask_points(3, "Chọn 3 điểm để tạo mặt phẳng")
+        if ids:
+            gen_face(self.scene, ids)
+
+    def rename_selected(self) -> None:
+        oid = self._selected_id()
+        if oid:
+            self.rename_object(oid)
+        else:
+            self.statusBar().showMessage("Hãy chọn một đối tượng trước", 3000)
+
     def add_distance(self) -> None:
         ids = self._ask_points(2, "Chọn 2 điểm để đo khoảng cách")
         if ids:
@@ -518,12 +557,15 @@ class MainWindow(QMainWindow):
     def _tick(self) -> None:
         self._phase += 0.06
         if self._rotate_on:
-            self.viewport.yaw += 0.6
+            self.viewport.yaw = (self.viewport.yaw - 0.6) % 360.0
         if self._anim_on:
             for o in self.scene.objects.values():
                 if o.ctor == "on_segment":
                     o.params["t"] = 0.5 + 0.5 * math.sin(self._phase)
             self.scene.evaluate()
+            self._tick_n = getattr(self, "_tick_n", 0) + 1
+            if self._tick_n % 8 == 0:
+                self.panel.refresh_values()
         self.viewport.update()
 
     # ---------------- file ----------------
@@ -582,7 +624,7 @@ class MainWindow(QMainWindow):
         A, B, C, D, S = pts
         M = gen_midpoint(self.scene, S, A, name="M")
         N = gen_midpoint(self.scene, S, C, name="N")
-        gen_segment(self.scene, M, N, color=(1.0, 0.8, 0.2, 1.0))
+        gen_segment(self.scene, M, N, color=(0.9, 0.45, 0.0, 1.0))
         gen_distance(self.scene, M, N)
         self.statusBar().showMessage(
             "Mẫu: chóp S.ABCD + M, N là trung điểm SA, SC + đoạn MN", 6000

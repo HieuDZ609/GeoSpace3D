@@ -24,7 +24,7 @@ def _pt(
     scene: Scene,
     name: str,
     xyz: Sequence[float],
-    color: RGBA = (0.95, 0.95, 0.95, 1.0),
+    color: RGBA = (0.12, 0.25, 0.85, 1.0),
 ) -> str:
     oid = scene.new_id("p")
     scene.add(
@@ -38,7 +38,7 @@ def _affine(
     scene: Scene,
     name: str,
     terms: list[list[float | str]],
-    color: RGBA = (0.95, 0.95, 0.95, 1.0),
+    color: RGBA = (0.12, 0.25, 0.85, 1.0),
 ) -> str:
     oid = scene.new_id("p")
     scene.add(
@@ -52,7 +52,7 @@ def _seg(
     scene: Scene,
     a: str,
     b: str,
-    color: RGBA = (0.85, 0.85, 0.95, 1.0),
+    color: RGBA = (0.12, 0.14, 0.22, 1.0),
 ) -> str:
     oid = scene.new_id("s")
     nm = scene.objects[a].name + scene.objects[b].name
@@ -121,7 +121,7 @@ def gen_point(
     scene: Scene,
     name: str,
     xyz: Sequence[float],
-    color: RGBA = (0.95, 0.95, 0.95, 1.0),
+    color: RGBA = (0.12, 0.25, 0.85, 1.0),
 ) -> str:
     return _pt(scene, name, xyz, color=color)
 
@@ -130,7 +130,7 @@ def gen_segment(
     scene: Scene,
     a_id: str,
     b_id: str,
-    color: RGBA = (0.85, 0.85, 0.95, 1.0),
+    color: RGBA = (0.12, 0.14, 0.22, 1.0),
 ) -> str:
     return _seg(scene, a_id, b_id, color=color)
 
@@ -326,7 +326,7 @@ def gen_midpoint(scene: Scene, a_id: str, b_id: str, name: str | None = None) ->
         scene,
         name or f"M{an}{bn}",
         [[0.5, a_id], [0.5, b_id]],
-        (1.0, 0.85, 0.3, 1.0),
+        (0.95, 0.50, 0.10, 1.0),
     )
 
 
@@ -336,7 +336,7 @@ def gen_symmetric(scene: Scene, a_id: str, center_id: str, name: str | None = No
         scene,
         name or f"{an}'",
         [[-1.0, a_id], [2.0, center_id]],
-        (1.0, 0.7, 0.4, 1.0),
+        (0.85, 0.35, 0.10, 1.0),
     )
 
 
@@ -355,7 +355,7 @@ def gen_divide(
         scene,
         name or f"P{an}{bn}",
         [[n / s, a_id], [m / s, b_id]],
-        (1.0, 0.85, 0.3, 1.0),
+        (0.95, 0.50, 0.10, 1.0),
     )
 
 
@@ -372,7 +372,7 @@ def gen_on_segment(
     scene.add(
         Node(oid, "point", _uniq_name(scene, name or f"N{an}{bn}"), "on_segment",
              {"a": a_id, "b": b_id, "t": float(t)},
-             color=(0.4, 1.0, 0.6, 1.0), group="Points")
+             color=(0.10, 0.65, 0.35, 1.0), group="Points")
     )
     return oid
 
@@ -386,7 +386,7 @@ def gen_distance(scene: Scene, a_id: str, b_id: str) -> str:
     scene.add(
         Node(oid, "measure", f"d({an},{bn})", "distance",
              {"a": a_id, "b": b_id},
-             color=(1.0, 0.9, 0.4, 1.0), group="Measures")
+             color=(0.85, 0.45, 0.00, 1.0), group="Measures")
     )
     return oid
 
@@ -399,6 +399,6 @@ def gen_angle(scene: Scene, a_id: str, vertex_id: str, c_id: str) -> str:
     scene.add(
         Node(oid, "measure", f"∠{an}{vn}{cn}", "angle",
              {"a": a_id, "b": vertex_id, "c": c_id},
-             color=(1.0, 0.9, 0.4, 1.0), group="Measures")
+             color=(0.85, 0.45, 0.00, 1.0), group="Measures")
     )
     return oid

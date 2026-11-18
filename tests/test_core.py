@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 
-from core.generators import (gen_angle, gen_cone, gen_cube, gen_cylinder,
+from core.builders import (gen_angle, gen_cone, gen_cube, gen_cylinder,
                              gen_distance, gen_midpoint, gen_on_segment,
                              gen_pyramid, gen_sphere, gen_symmetric)
 from core.scene import Obj, Scene
