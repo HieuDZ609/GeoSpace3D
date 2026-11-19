@@ -518,6 +518,74 @@ class MainWindow(QMainWindow):
         self._refresh_tree()
         self.viewport.update()
 
+    def add_line_parametric(self, x0, y0, z0, a, b, c, L=10.0) -> None:
+        import math
+        if a == 0 and b == 0 and c == 0:
+            QMessageBox.warning(self, "Lỗi", "Vectơ chỉ phương không thể là vectơ không.")
+            return
+        nrm = math.sqrt(a*a + b*b + c*c)
+        dx, dy, dz = a/nrm, b/nrm, c/nrm
+        p1 = (x0 - L*dx, y0 - L*dy, z0 - L*dz)
+        p2 = (x0 + L*dx, y0 + L*dy, z0 + L*dz)
+        from core import builders
+        i1 = builders.gen_point(self.scene, "P1", p1)
+        i2 = builders.gen_point(self.scene, "P2", p2)
+        builders.gen_segment(self.scene, i1, i2)
+        self._refresh_tree()
+        self.viewport.update()
+
+    def add_line_general_2d(self, a, b, c, L=10.0) -> None:
+        import math
+        if a == 0 and b == 0:
+            QMessageBox.warning(self, "Lỗi", "a, b không đồng thời bằng 0.")
+            return
+        if abs(a) >= abs(b):
+            x0, y0 = -c/a, 0.0
+        else:
+            x0, y0 = 0.0, -c/b
+        dx, dy = -b, a
+        nrm = math.sqrt(dx*dx + dy*dy)
+        dx, dy = dx/nrm, dy/nrm
+        p1 = (x0 - L*dx, y0 - L*dy, 0.0)
+        p2 = (x0 + L*dx, y0 + L*dy, 0.0)
+        from core import builders
+        i1 = builders.gen_point(self.scene, "P1", p1)
+        i2 = builders.gen_point(self.scene, "P2", p2)
+        builders.gen_segment(self.scene, i1, i2)
+        self._refresh_tree()
+        self.viewport.update()
+
+    def add_plane_equation(self, a, b, c, d, size=6.0) -> None:
+        import math
+        import numpy as np
+        if a == 0 and b == 0 and c == 0:
+            QMessageBox.warning(self, "Lỗi", "Vectơ pháp tuyến không thể là vectơ không.")
+            return
+        nrm = math.sqrt(a*a + b*b + c*c)
+        nx, ny, nz = a/nrm, b/nrm, c/nrm
+        if abs(c) > 1e-9:
+            px, py, pz = 0.0, 0.0, -d/c
+        elif abs(b) > 1e-9:
+            px, py, pz = 0.0, -d/b, 0.0
+        else:
+            px, py, pz = -d/a, 0.0, 0.0
+        nvec = np.array([nx, ny, nz])
+        ref = np.array([0.0, 0.0, 1.0]) if abs(nz) < 0.9 else np.array([1.0, 0.0, 0.0])
+        u = np.cross(nvec, ref)
+        u /= np.linalg.norm(u)
+        v = np.cross(nvec, u)
+        v /= np.linalg.norm(v)
+        corners = []
+        for su in (-1, 1):
+            for sv in (-1, 1):
+                pt = np.array([px, py, pz]) + size*su*u + size*sv*v
+                corners.append(tuple(float(x) for x in pt))
+        from core import builders
+        ids = [builders.gen_point(self.scene, f"Q{i}", pt) for i, pt in enumerate(corners)]
+        builders.gen_face(self.scene, ids, color=(0.5, 0.7, 0.9, 0.35))
+        self._refresh_tree()
+        self.viewport.update()
+
     def add_face3(self) -> None:
         ids = self._ask_points(3, "Chọn 3 điểm để tạo mặt phẳng")
         if ids:

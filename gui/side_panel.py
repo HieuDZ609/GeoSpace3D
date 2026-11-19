@@ -732,6 +732,98 @@ class _BezierTab(QWidget):
 
 
 # ======================================================================
+#  Tab Phuong trinh: duong thang & mat phang
+# ======================================================================
+class _EquationTab(QWidget):
+    def __init__(self, panel: "SidePanel") -> None:
+        super().__init__()
+        self.panel = panel
+        w = panel.win
+        v = QVBoxLayout(self)
+        v.setContentsMargins(8, 4, 8, 8)
+
+        v.addWidget(_heading("Đường thẳng tham số (3D)"))
+        r = QHBoxLayout()
+        for lbl, attr, default in (("x0", "x0", 0.0), ("y0", "y0", 0.0), ("z0", "z0", 0.0)):
+            r.addWidget(QLabel(lbl))
+            sp = QDoubleSpinBox(); sp.setRange(-100, 100); sp.setDecimals(2); sp.setValue(default)
+            setattr(self, attr, sp); r.addWidget(sp)
+        v.addLayout(r)
+        r = QHBoxLayout()
+        for lbl, attr, default in (("a", "a", 1.0), ("b", "b", 1.0), ("c", "c", 1.0)):
+            r.addWidget(QLabel(lbl))
+            sp = QDoubleSpinBox(); sp.setRange(-100, 100); sp.setDecimals(2); sp.setValue(default)
+            setattr(self, attr, sp); r.addWidget(sp)
+        v.addLayout(r)
+        r = QHBoxLayout()
+        r.addWidget(QLabel("L (nửa dài)"))
+        self.L = QDoubleSpinBox(); self.L.setRange(0.1, 100); self.L.setDecimals(1); self.L.setValue(10.0)
+        r.addWidget(self.L)
+        v.addLayout(r)
+        b = QPushButton("Vẽ đường thẳng")
+        b.clicked.connect(self._draw_line)
+        v.addWidget(b)
+
+        v.addWidget(_heading("Đường thẳng tổng quát (Oxy): a x + b y + c = 0"))
+        r = QHBoxLayout()
+        for lbl, attr in (("a", "ga"), ("b", "gb"), ("c", "gc")):
+            r.addWidget(QLabel(lbl))
+            sp = QDoubleSpinBox(); sp.setRange(-100, 100); sp.setDecimals(2); sp.setValue(1.0 if lbl != "c" else 0.0)
+            setattr(self, attr, sp); r.addWidget(sp)
+        v.addLayout(r)
+        r = QHBoxLayout()
+        r.addWidget(QLabel("L (nửa dài)"))
+        self.gL = QDoubleSpinBox(); self.gL.setRange(0.1, 100); self.gL.setDecimals(1); self.gL.setValue(10.0)
+        r.addWidget(self.gL)
+        v.addLayout(r)
+        b = QPushButton("Vẽ đường thẳng")
+        b.clicked.connect(self._draw_line_general)
+        v.addWidget(b)
+
+        v.addWidget(_heading("Mặt phẳng: a x + b y + c z + d = 0"))
+        r = QHBoxLayout()
+        for lbl, attr in (("a", "pa"), ("b", "pb"), ("c", "pc"), ("d", "pd")):
+            r.addWidget(QLabel(lbl))
+            sp = QDoubleSpinBox(); sp.setRange(-100, 100); sp.setDecimals(2); sp.setValue(1.0 if lbl != "d" else -12.0)
+            setattr(self, attr, sp); r.addWidget(sp)
+        v.addLayout(r)
+        r = QHBoxLayout()
+        r.addWidget(QLabel("Kích thước"))
+        self.psize = QDoubleSpinBox(); self.psize.setRange(0.5, 50); self.psize.setDecimals(1); self.psize.setValue(6.0)
+        r.addWidget(self.psize)
+        v.addLayout(r)
+        b = QPushButton("Vẽ mặt phẳng")
+        b.clicked.connect(self._draw_plane)
+        v.addWidget(b)
+
+        self.msg = QLabel("")
+        self.msg.setWordWrap(True)
+        v.addWidget(self.msg)
+
+        v.addStretch(1)
+
+    def _draw_line(self) -> None:
+        w = self.panel.win
+        w.add_line_parametric(self.x0.value(), self.y0.value(), self.z0.value(),
+                              self.a.value(), self.b.value(), self.c.value(), self.L.value())
+        self.msg.setStyleSheet("color:#1e8449;")
+        self.msg.setText("✓ Đã vẽ đường thẳng")
+
+    def _draw_line_general(self) -> None:
+        w = self.panel.win
+        w.add_line_general_2d(self.ga.value(), self.gb.value(), self.gc.value(), self.gL.value())
+        self.msg.setStyleSheet("color:#1e8449;")
+        self.msg.setText("✓ Đã vẽ đường thẳng")
+
+    def _draw_plane(self) -> None:
+        w = self.panel.win
+        w.add_plane_equation(self.pa.value(), self.pb.value(), self.pc.value(),
+                            self.pd.value(), self.psize.value())
+        self.msg.setStyleSheet("color:#1e8449;")
+        self.msg.setText("✓ Đã vẽ mặt phẳng")
+
+
+# ======================================================================
 #  Tab 3: Thong tin chi tiet
 # ======================================================================
 class _InfoTab(QWidget):
@@ -828,10 +920,12 @@ class SidePanel(QTabWidget):
         self.tab_numeric = _NumericTab(self)
         self.tab_geometry = _GeometryTab(self)
         self.tab_bezier = _BezierTab(self)
+        self.tab_equation = _EquationTab(self)
         self.tab_info = _InfoTab(self)
         self.addTab(self.tab_numeric, "Số học")
         self.addTab(self.tab_geometry, "Hình học")
         self.addTab(self.tab_bezier, "Bezier")
+        self.addTab(self.tab_equation, "Phương trình")
         self.addTab(self.tab_info, "Thông tin")
         self.setCurrentIndex(1)     # mo san tab Hinh hoc
         f = self.tabBar().font()
