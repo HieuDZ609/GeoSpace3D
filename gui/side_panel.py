@@ -212,6 +212,40 @@ def _ic_color(p):
 def _ic_delete(p):
     _line(p, (10, 10), (34, 34), _RED, 3.0); _line(p, (34, 10), (10, 34), _RED, 3.0)
 
+def _ico_alt_plane(p: QPainter):
+    # Vẽ mặt phẳng nằm dưới và đường vuông góc từ trên hạ xuống
+    p.setPen(QPen(QColor(150, 160, 180), 2))
+    p.drawLine(6, 34, 38, 34) # Mặt đáy
+    p.setPen(QPen(QColor(220, 50, 50), 2))
+    p.drawLine(22, 8, 22, 34) # Đường cao đỏ
+    # Ký hiệu góc vuông nhỏ
+    p.setPen(QPen(QColor(60, 60, 60), 1))
+    p.drawLine(22, 28, 28, 28)
+    p.drawLine(28, 28, 28, 34)
+
+def _ico_alt_line(p: QPainter):
+    # Vẽ đoạn thẳng chéo và đường vuông góc hạ xuống
+    p.setPen(QPen(QColor(60, 60, 80), 2))
+    p.drawLine(6, 36, 38, 20)
+    p.setPen(QPen(QColor(220, 50, 50), 2))
+    p.drawLine(14, 8, 22, 28)
+
+
+def _ico_bisector(p: QPainter):
+    # Vẽ góc và tia phân giác ở giữa
+    p.setPen(QPen(QColor(60, 60, 80), 2))
+    p.drawLine(8, 36, 36, 36) # Cạnh đáy
+    p.drawLine(8, 36, 30, 10) # Cạnh bên
+    p.setPen(QPen(QColor(240, 140, 20), 2))
+    p.drawLine(8, 36, 36, 22) # Tia phân giác cam
+
+def _ico_perp_plane(p: QPainter):
+    # Đoạn thẳng xuyên qua tấm kính ở giữa
+    p.setPen(QPen(QColor(70, 130, 220), 2))
+    p.drawRect(14, 8, 16, 28) # Mặt phẳng trung trực
+    p.setPen(QPen(QColor(220, 50, 50), 2))
+    p.drawLine(4, 22, 40, 22) # Đoạn thẳng xuyên qua
+
 
 _ICONS = {
     "point": _ic_point, "midpoint": _ic_midpoint, "on_segment": _ic_on_segment,
@@ -220,6 +254,10 @@ _ICONS = {
     "pyramid": _ic_pyramid, "prism": _ic_prism, "cylinder": _ic_cylinder,
     "cone": _ic_cone, "sphere": _ic_sphere, "distance": _ic_distance, "angle": _ic_angle,
     "visible": _ic_visible, "rename": _ic_rename, "color": _ic_color, "delete": _ic_delete,
+    "altitude_plane": _ico_alt_plane,
+    "altitude_line": _ico_alt_line,
+    "bisector": _ico_bisector,
+    "perp_bisector": _ico_perp_plane,
 }
 
 
@@ -460,10 +498,14 @@ class _GeometryTab(QScrollArea):
             ]),
             ("Đường thẳng", [
                 ("segment", "Đoạn thẳng", w.add_segment),
+                ("altitude_line", "Đường cao\nxuống đoạn", w.add_altitude_to_line),
+                ("bisector", "Đường\nphân giác", w.add_angle_bisector),
             ]),
             ("Mặt phẳng", [
                 ("face3", "Mặt qua\n3 điểm", w.add_face3),
                 ("face", "Mặt\nđa giác", w.add_face),
+                 ("altitude_plane", "Đường cao\nxuống MP", w.add_altitude_to_plane),
+                ("perp_bisector", "MP trung\ntrực", w.add_perp_bisector_plane),
             ]),
             ("Hình có sẵn", [
                 ("cube", "Lập phương", lambda: w.create_solid("cube")),
@@ -620,3 +662,5 @@ class SidePanel(QTabWidget):
         sel = self.win._selected_id()
         self.tab_numeric.refresh(sel)
         self.tab_info.refresh_detail(sel)
+
+    

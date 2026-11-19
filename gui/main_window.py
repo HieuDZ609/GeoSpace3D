@@ -45,6 +45,11 @@ from core.builders import (
     gen_segment,
     gen_sphere,
     gen_symmetric,
+    gen_altitude_to_plane,
+    gen_altitude_to_line,
+    gen_angle_bisector,
+    gen_plane_through_points,
+    gen_perp_bisector_segment,
 )
 from core.scene import Scene
 from gui.dialogs import AddPointDialog, CreateSolidDialog
@@ -138,10 +143,13 @@ class MainWindow(QMainWindow):
                                 "Hiện / ẩn mặt phẳng Oxy")
         self.act_grid = toggle("Lưới", False, lambda c: self.viewport.set_show_grid(c),
                                "Hiện / ẩn lưới ô vuông")
+
+        
         tb.addSeparator()
         self.act_rotate = toggle("Tự xoay", False, lambda _c: self.toggle_rotate())
         self.act_anim = toggle("Chạy điểm", False, lambda _c: self.toggle_anim())
 
+        
         # Phim tat Delete: xoa doi tuong dang chon
         a = QAction(self)
         a.setShortcut("Delete")
@@ -646,3 +654,63 @@ class MainWindow(QMainWindow):
             if o.kind == "point" and o.name == name:
                 return o.id
         return None
+
+    def add_altitude_to_plane(self) -> None:
+        """Hạ đường cao SH xuống mặt phẳng qua các điểm (ví dụ MNAB)"""
+        p_name = QInputDialog.getText(self, "Đường cao xuống mặt phẳng", "Nhập tên điểm đỉnh S:")[0].strip()
+        s_id = self._find_point(p_name)
+        if not s_id:
+            QMessageBox.warning(self, "Lỗi", f"Không tìm thấy điểm '{p_name}'.")
+            return
+            
+        pts_str = QInputDialog.getText(self, "Mặt phẳng đáy", "Nhập tên các điểm mặt phẳng (cách nhau dấu cách, ví dụ: M N A B hoặc A B C):")[0].split()
+        plane_pt_ids = [self._find_point(x) for x in pts_str]
+        if len(plane_pt_ids) < 3 or any(pid is None for pid in plane_pt_ids):
+            QMessageBox.warning(self, "Lỗi", "Cần nhập ít nhất 3 điểm hợp lệ để tạo mặt phẳng.")
+            return
+        h_id, sh_id = gen_altitude_to_plane(self.scene, s_id, plane_pt_ids, name="H")
+        self._refresh_tree()
+        self.viewport.update()
+    def add_altitude_to_line(self) -> None:
+        """Hạ đường cao SH xuống đoạn thẳng AB"""
+        p_name = QInputDialog.getText(self, "Đường cao xuống đường thẳng", "Nhập tên điểm đỉnh S:")[0].strip()
+        s_id = self._find_point(p_name)
+        if not s_id:
+            QMessageBox.warning(self, "Lỗi", f"Không tìm thấy điểm '{p_name}'.")
+            return
+            
+        pts = self._ask_points(2, "Chọn đường thẳng AB")
+        if not pts:
+            return
+        h_id, sh_id = gen_altitude_to_line(self.scene, s_id, pts[0], pts[1], name="H")
+        self._refresh_tree()
+        self.viewport.update()
+    def add_angle_bisector(self) -> None:
+        """Dựng đường phân giác góc B qua 3 điểm A B C"""
+        pts = self._ask_points(3, "Đường phân giác (A - Đỉnh B - C)")
+        if not pts:
+            return
+        d_id, bd_id = gen_angle_bisector(self.scene, pts[0], pts[1], pts[2], name="D")
+        self._refresh_tree()
+        self.viewport.update()
+    def add_plane_from_points(self) -> None:
+        """Dựng mặt phẳng qua các điểm bất kỳ"""
+        pts_str = QInputDialog.getText(self, "Mặt phẳng", "Nhập tên các điểm qua mặt phẳng (ví dụ: A B C hoặc M N A B):")[0].split()
+        pt_ids = [self._find_point(x) for x in pts_str]
+        if len(pt_ids) < 3 or any(pid is None for pid in pt_ids):
+            QMessageBox.warning(self, "Lỗi", "Cần ít nhất 3 điểm hợp lệ.")
+            return
+        gen_plane_through_points(self.scene, pt_ids, name="mp")
+        self._refresh_tree()
+        self.viewport.update()
+    def add_perp_bisector_plane(self) -> None:
+        """Dựng mặt phẳng trung trực của đoạn AB"""
+        pts = self._ask_points(2, "Mặt phẳng trung trực đoạn thẳng AB")
+        if not pts:
+            return
+        gen_perp_bisector_segment(self.scene, pts[0], pts[1], name="M")
+        self._refresh_tree()
+        self.viewport.update()
+
+  
+    

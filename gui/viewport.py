@@ -59,7 +59,7 @@ from OpenGL.GL import (
     glViewport,
 )
 from OpenGL.GL import GL_COMPILE, GL_LINE_LOOP, GL_QUADS, glCallList, glEndList, glGenLists, glNewList
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QPointF
 from PyQt6.QtGui import QColor, QFont, QPainter
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 
@@ -123,9 +123,9 @@ class Viewport(QOpenGLWidget):
         super().__init__(parent)
         self.scene: Scene | None = None
         # Goc nhin mac dinh kieu GeoGebra 3D: +X do huong trai-duoi, +Y xanh la phai-duoi, +Z thang dung
-        self.yaw: float = 35.0
-        self.pitch: float = 22.0
-        self.dist: float = 18.0
+        self.yaw: float = -50.0
+        self.pitch: float = 24.0
+        self.dist: float = 22.0
         self.target: list[float] = [0.0, 0.0, 0.0]
 
         self.ortho: bool = False
@@ -646,9 +646,9 @@ class Viewport(QOpenGLWidget):
         # 1) Ten 3 truc chinh x, y, z
         p.setFont(f_axis)
         for pt, label, col in [
-            (vec3(L + 0.9, 0.0, 0.0), "x", qx),
-            (vec3(0.0, L + 0.9, 0.0), "y", qy),
-            (vec3(0.0, 0.0, L + 0.9), "z", qz),
+            (vec3(L + 1.2, 0.0, 0.0), "x", qx),
+            (vec3(0.0, L + 1.2, 0.0), "y", qy),
+            (vec3(0.0, 0.0, 8.3), "z", qz),
         ]:
             proj = project_to_screen(pt, self._mv, self._proj, self._vp)
             if proj and 0.0 <= proj[2] <= 1.0:
@@ -657,21 +657,27 @@ class Viewport(QOpenGLWidget):
 
         # 2) So chia don vi tren cac truc
         p.setFont(f_small)
-        step = 1 if self.dist < 30 else 2
+         # So tren truc X
         for i in range(-int(L), int(L) + 1):
-            if i % step:
-                continue
-            for pt, col, off in (
-                (vec3(i, 0, 0), qx, (-3, 16)),
-                (vec3(0, i, 0), qy, (-3, 16)),
-                (vec3(0, 0, i), qz, (-16, 4)),
-            ):
-                if i == 0 and col is not qx:
-                    continue
-                proj = project_to_screen(pt, self._mv, self._proj, self._vp)
-                if proj and 0.0 <= proj[2] <= 1.0:
-                    p.setPen(QColor(60, 60, 70) if i == 0 else col)
-                    p.drawText(int(proj[0]) + off[0], int(proj[1]) + off[1], str(i))
+            if i == 0: continue
+            proj = project_to_screen(vec3(i, 0, 0), self._mv, self._proj, self._vp)
+            if proj and 0.0 <= proj[2] <= 1.0:
+                p.setPen(qx)
+                p.drawText(int(proj[0]) - 6, int(proj[1]) + 15, str(i))
+        # So tren truc Y
+        for i in range(-int(L), int(L) + 1):
+            if i == 0: continue
+            proj = project_to_screen(vec3(0, i, 0), self._mv, self._proj, self._vp)
+            if proj and 0.0 <= proj[2] <= 1.0:
+                p.setPen(qy)
+                p.drawText(int(proj[0]) - 15, int(proj[1]) - 4, str(i))
+        # So tren truc Z
+        for i in range(-4, 8):
+            if i == 0: continue
+            proj = project_to_screen(vec3(0, 0, i), self._mv, self._proj, self._vp)
+            if proj and 0.0 <= proj[2] <= 1.0:
+                p.setPen(qz)
+                p.drawText(int(proj[0]) - 16, int(proj[1]) + 4, str(i))
 
         # 3) Nhan x, y, z tren cum truc co dinh o goc man hinh
         if self.show_corner_axes:
@@ -723,14 +729,19 @@ class Viewport(QOpenGLWidget):
         self._last = ev.position()
         shift_held = bool(ev.modifiers() & Qt.KeyboardModifier.ShiftModifier)
 
-        if ev.button() == Qt.MouseButton.LeftButton and not shift_held:
+        if ev.button() == Qt.MouseButton.RightButton:
             self._mode = "rotate"
+            self.update()
+            return
+        
+        if ev.button() == Qt.MouseButton.LeftButton and not shift_held:
             picked = self._try_pick(ev.position())
             self.selected_id = picked or None
             self.objectClicked.emit(picked or "")
+            self._mode = "rotate"   # Cho phép kéo chuột trái để xoay tự do
             self.update()
         elif (
-            ev.button() in (Qt.MouseButton.RightButton, Qt.MouseButton.MiddleButton)
+            ev.button() == Qt.MouseButton.MiddleButton
             or (ev.button() == Qt.MouseButton.LeftButton and shift_held)
         ):
             self._mode = "pan"
@@ -743,9 +754,9 @@ class Viewport(QOpenGLWidget):
         self._last = ev.position()
 
         if self._mode == "rotate":
-            # Xoay 4 huong (trai/phai/len/xuong) kieu GeoGebra 3D
-            self.yaw = (self.yaw - dx * 0.45) % 360.0
-            self.pitch = max(-89.0, min(89.0, self.pitch + dy * 0.45))
+            # Xoay 4 huong (trai/phai/len/xuong)
+            self.yaw = (self.yaw - dx * 0.30) % 360.0
+            self.pitch = max(-89.0, min(89.0, self.pitch - dy * 0.30))
             self.update()
         elif self._mode == "pan" and not self.lock_origin and self._mv is not None:
             k = 0.0018 * self.dist
@@ -795,7 +806,7 @@ class Viewport(QOpenGLWidget):
         elif k == Qt.Key.Key_3:
             self.yaw, self.pitch = 90.0, 0.0
         elif k == Qt.Key.Key_0:
-            self.yaw, self.pitch = 35.0, 22.0
+            self.yaw, self.pitch = -50.0, 24.0
         elif not self.lock_origin and self._mv is not None:
             step = self.dist * 0.06
             right_vec = self._mv[0, :3]
@@ -811,7 +822,7 @@ class Viewport(QOpenGLWidget):
         self.update()
 
     def reset_view(self) -> None:
-        self.yaw, self.pitch, self.dist = 35.0, 22.0, 18.0
+        self.yaw, self.pitch, self.dist = -50.0, 24.0, 22.0
         self.target = [0.0, 0.0, 0.0]
         self.ortho = False
         self.display_mode = "solid"

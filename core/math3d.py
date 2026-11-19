@@ -208,9 +208,9 @@ def look_at_matrix(eye: Vec3, target: Vec3, up: Vec3 = np.array([0.0, 0.0, 1.0])
     u = np.cross(f, r)              # truc +Y cua camera (len tren)
 
     M = mat4_identity()
-    M[0, :3] = r
-    M[1, :3] = u
-    M[2, :3] = f
+    M[:3, 0] = r                    # Cột 0 là r
+    M[:3, 1] = u                    # Cột 1 là u
+    M[:3, 2] = f                    # Cột 2 là f
     M[3, 0] = -dot(r, eye_v)
     M[3, 1] = -dot(u, eye_v)
     M[3, 2] = -dot(f, eye_v)
@@ -260,3 +260,42 @@ def project_to_screen(
     sz = (ndc[2] + 1.0) * 0.5
     # Chuyen goc Y tu duoi-len (OpenGL) sang tren-xuong
     return (float(sx), float(vh - sy), float(sz))
+
+def project_point_to_plane(point: Vec3, plane_pt: Vec3, normal: Vec3) -> Vec3:
+    """Hạ hình chiếu vuông góc từ điểm P xuống mặt phẳng (qua plane_pt có pháp tuyến normal).
+    Công thức: H = P - [ (P - P0) . n / ||n||^2 ] * n
+    """
+    p = np.asarray(point, dtype=np.float64)
+    p0 = np.asarray(plane_pt, dtype=np.float64)
+    n = unit(np.asarray(normal, dtype=np.float64))
+    dist = dot(p - p0, n)
+    return p - dist * n
+
+def project_point_to_line(point: Vec3, line_a: Vec3, line_b: Vec3) -> Vec3:
+    """Hạ hình chiếu vuông góc từ điểm P xuống đường thẳng qua 2 điểm A, B.
+    Công thức: H = A + [ (P - A) . AB / ||AB||^2 ] * AB
+    """
+    p = np.asarray(point, dtype=np.float64)
+    a = np.asarray(line_a, dtype=np.float64)
+    b = np.asarray(line_b, dtype=np.float64)
+    ab = b - a
+    len_sq = dot(ab, ab)
+    if len_sq < 1e-12:
+        return a
+    t = dot(p - a, ab) / len_sq
+    return a + t * ab
+
+def angle_bisector_point(a: Vec3, vertex: Vec3, c: Vec3) -> Vec3:
+    """Tìm chân đường phân giác trong D của góc B trên cạnh AC.
+    Theo định lý đường phân giác: DA / DC = BA / BC = c_len / a_len
+    => D = (a_len * A + c_len * C) / (a_len + c_len)
+    """
+    pt_a = np.asarray(a, dtype=np.float64)
+    pt_b = np.asarray(vertex, dtype=np.float64)
+    pt_c = np.asarray(c, dtype=np.float64)
+    c_len = norm(pt_a - pt_b) # độ dài cạnh BA
+    a_len = norm(pt_c - pt_b) # độ dài cạnh BC
+    total = a_len + c_len
+    if total < 1e-12:
+        return (pt_a + pt_c) * 0.5
+    return (a_len * pt_a + c_len * pt_c) / total

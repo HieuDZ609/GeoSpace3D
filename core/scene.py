@@ -18,7 +18,7 @@ from core.geometry import (
     SolidModel,
     WireFrame,
 )
-from core.math3d import angle_between, normal_of_points, unit, vec3
+from core.math3d import angle_between, normal_of_points, unit, vec3,project_point_to_plane, project_point_to_line, angle_bisector_point
 from core.primitives import build_cone, build_cylinder, build_sphere
 
 
@@ -295,6 +295,28 @@ class Scene:
                 segment=None,
             )
 
+         # 1. Chân đường cao hạ xuống mặt phẳng
+        if c == "project_to_plane":
+            s = np.asarray(g[p["point"]].value, dtype=np.float64)
+            # Lấy toạ độ các điểm của mặt phẳng
+            pts = [np.asarray(g[pid].value, dtype=np.float64) for pid in p["plane_pts"]]
+            nrm = normal_of_points(pts[0], pts[1], pts[2])
+            return project_point_to_plane(s, pts[0], nrm)
+        
+        # 2. Chân đường cao hạ xuống đường thẳng / đoạn thẳng
+        if c == "project_to_line":
+            s = np.asarray(g[p["point"]].value, dtype=np.float64)
+            a = np.asarray(g[p["a"]].value, dtype=np.float64)
+            b = np.asarray(g[p["b"]].value, dtype=np.float64)
+            return project_point_to_line(s, a, b)
+        
+        # 3. Chân đường phân giác trong
+        if c == "bisector_point":
+            a = np.asarray(g[p["a"]].value, dtype=np.float64)
+            v = np.asarray(g[p["vertex"]].value, dtype=np.float64)
+            c_pt = np.asarray(g[p["c"]].value, dtype=np.float64)
+            return angle_bisector_point(a, v, c_pt)
+        
         raise ValueError(f"ctor khong ho tro: {c}")
 
     # ---------- Serialize (JSON) ----------

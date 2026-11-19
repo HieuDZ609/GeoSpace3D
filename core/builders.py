@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import math
 from typing import Sequence
-
+import numpy as np
 from core.geometry import Node, RGBA
 from core.scene import Scene
-
+from core.math3d import unit
 
 # ---------------- helpers ----------------
 
@@ -402,3 +402,77 @@ def gen_angle(scene: Scene, a_id: str, vertex_id: str, c_id: str) -> str:
              color=(0.85, 0.45, 0.00, 1.0), group="Measures")
     )
     return oid
+
+def gen_altitude_to_plane(
+    scene: Scene, point_id: str, plane_pt_ids: list[str], name: str = "H"
+) -> tuple[str, str]:
+    """Dựng đường cao từ điểm S xuống mặt phẳng qua các điểm (ví dụ MNAB)."""
+    # 1. Tạo điểm chân đường cao H phụ thuộc qua Node
+    h_id = scene.new_id("p")
+    scene.add(
+        Node(h_id, "point", _uniq_name(scene, name), "project_to_plane",
+             {"point": point_id, "plane_pts": plane_pt_ids},
+             color=(0.1, 0.2, 0.9, 1.0), group="Points")
+    )
+    # 2. Tạo đoạn thẳng SH (hàm _seg tự động ghép tên S + H = SH)
+    sh_id = _seg(scene, point_id, h_id, color=(0.1, 0.2, 0.9, 1.0))
+    scene.evaluate()
+    return h_id, sh_id
+
+def gen_altitude_to_line(
+    scene: Scene, point_id: str, a_id: str, b_id: str, name: str = "H"
+) -> tuple[str, str]:
+    """Dựng đường cao từ điểm S xuống đường thẳng AB."""
+    h_id = scene.new_id("p")
+    scene.add(
+        Node(h_id, "point", _uniq_name(scene, name), "project_to_line",
+             {"point": point_id, "a": a_id, "b": b_id},
+             color=(0.1, 0.2, 0.9, 1.0), group="Points")
+    )
+    sh_id = _seg(scene, point_id, h_id, color=(0.1, 0.2, 0.9, 1.0))
+    scene.evaluate()
+    return h_id, sh_id
+
+def gen_angle_bisector(
+    scene: Scene, a_id: str, vertex_id: str, c_id: str, name: str = "D"
+) -> tuple[str, str]:
+    """Dựng đường phân giác trong của góc B (đỉnh vertex_id)."""
+    d_id = scene.new_id("p")
+    scene.add(
+        Node(d_id, "point", _uniq_name(scene, name), "bisector_point",
+             {"a": a_id, "vertex": vertex_id, "c": c_id},
+             color=(0.9, 0.5, 0.1, 1.0), group="Points")
+    )
+    bd_id = _seg(scene, vertex_id, d_id, color=(0.9, 0.5, 0.1, 1.0))
+    scene.evaluate()
+    return d_id, bd_id
+
+def gen_plane_through_points(scene: Scene, pt_ids: list[str], name: str = "mp") -> str:
+    """Tạo một mặt phẳng đa giác đi qua các điểm bất kỳ."""
+    face_id = _face(scene, pt_ids, color=(0.5, 0.7, 0.9, 0.45), name=name)
+    scene.evaluate()
+    return face_id
+
+def gen_perp_bisector_segment(
+    scene: Scene, a_id: str, b_id: str, name: str = "M"
+) -> str:
+    """Dựng mặt phẳng trung trực của đoạn thẳng AB."""
+    m_id = gen_midpoint(scene, a_id, b_id, name=name)
+    scene.evaluate()
+    
+    A = np.asarray(scene.objects[a_id].value, dtype=np.float64)
+    B = np.asarray(scene.objects[b_id].value, dtype=np.float64)
+    n = unit(B - A)
+    
+    ref = np.array([0.0, 0.0, 1.0]) if abs(n[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+    u = unit(np.cross(n, ref))
+    v = unit(np.cross(n, u))
+    L = 3.0
+    M_val = np.asarray(scene.objects[m_id].value, dtype=np.float64)
+    
+    p1 = _pt(scene, f"K1_{name}", list(M_val + L * u + L * v))
+    p2 = _pt(scene, f"K2_{name}", list(M_val - L * u + L * v))
+    p3 = _pt(scene, f"K3_{name}", list(M_val - L * u - L * v))
+    p4 = _pt(scene, f"K4_{name}", list(M_val + L * u - L * v))
+    plane_id = gen_plane_through_points(scene, [p1, p2, p3, p4], name=f"mp_TrungTruc_{name}")
+    return plane_id
