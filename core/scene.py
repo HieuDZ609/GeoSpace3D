@@ -18,7 +18,9 @@ from core.geometry import (
     SolidModel,
     WireFrame,
 )
-from core.math3d import angle_between, normal_of_points, unit, vec3,project_point_to_plane, project_point_to_line, angle_bisector_point
+from core.math3d import (angle_between, normal_of_points, unit, vec3,
+                         project_point_to_plane, project_point_to_line,
+                         angle_bisector_point, safe_eval_expr)
 from core.primitives import build_cone, build_cylinder, build_sphere
 
 
@@ -317,6 +319,69 @@ class Scene:
             c_pt = np.asarray(g[p["c"]].value, dtype=np.float64)
             return angle_bisector_point(a, v, c_pt)
         
+        if c == "bezier":
+            pts_ids: list[str] = p["pts"]
+            ctrl = [np.asarray(g[pid].value, dtype=np.float64) for pid in pts_ids]
+            if len(ctrl) < 2:
+                raise ValueError("Bezier can it nhat 2 diem kiem soat")
+            n = len(ctrl) - 1
+            m = int(p.get("samples", 60))
+            if m < 2:
+                m = 2
+            from math import comb
+            verts: list[np.ndarray] = []
+            for i in range(m + 1):
+                t = i / m
+                pt = np.zeros(3, dtype=np.float64)
+                for k in range(n + 1):
+                    pt += comb(n, k) * ((1.0 - t) ** (n - k)) * (t ** k) * ctrl[k]
+                verts.append(pt)
+            arr = np.array(verts, dtype=np.float64)
+            edges = [(i, i + 1) for i in range(len(verts) - 1)]
+            return WireFrame(vertices=arr, edges=edges)
+
+        if c == "parametric":
+            Xe, Ye, Ze = p["X"], p["Y"], p["Z"]
+            umin = float(p["umin"]); umax = float(p["umax"])
+            vmin = float(p["vmin"]); vmax = float(p["vmax"])
+            nu = int(p["nu"]); nv = int(p["nv"])
+            if nu < 1:
+                nu = 1
+            if nv < 1:
+                nv = 1
+            coeffs = p.get("coeffs", {}) or {}
+            verts: list[list[float]] = []
+            grid: list[list[int]] = []
+            for i in range(nu + 1):
+                u = umin + (umax - umin) * i / nu
+                row: list[int] = []
+                for j in range(nv + 1):
+                    v = vmin + (vmax - vmin) * j / nv
+                    ctx = {"u": u, "v": v}
+                    ctx.update(coeffs)
+                    x = safe_eval_expr(Xe, ctx)
+                    y = safe_eval_expr(Ye, ctx)
+                    z = safe_eval_expr(Ze, ctx)
+                    row.append(len(verts))
+                    verts.append([x, y, z])
+                grid.append(row)
+            arr = np.array(verts, dtype=np.float64)
+            faces: list[list[int]] = []
+            edge_set: set[tuple[int, int]] = set()
+            for i in range(nu):
+                for j in range(nv):
+                    a = grid[i][j]
+                    b = grid[i + 1][j]
+                    cc = grid[i + 1][j + 1]
+                    d = grid[i][j + 1]
+                    faces.append([a, b, cc, d])
+                    for u_, v_ in ((a, b), (b, cc), (cc, d), (d, a)):
+                        edge_set.add((min(u_, v_), max(u_, v_)))
+            return SolidModel(
+                face_model=FaceModel(vertices=arr, faces=faces),
+                wireframe=WireFrame(vertices=arr, edges=sorted(edge_set)),
+            )
+
         raise ValueError(f"ctor khong ho tro: {c}")
 
     # ---------- Serialize (JSON) ----------

@@ -299,3 +299,88 @@ def angle_bisector_point(a: Vec3, vertex: Vec3, c: Vec3) -> Vec3:
     if total < 1e-12:
         return (pt_a + pt_c) * 0.5
     return (a_len * pt_a + c_len * pt_c) / total
+
+
+import ast as _ast
+
+_SAFE_FUNCS = {
+    "sin": math.sin, "cos": math.cos, "tan": math.tan,
+    "asin": math.asin, "acos": math.acos, "atan": math.atan, "atan2": math.atan2,
+    "sqrt": math.sqrt, "abs": abs, "exp": math.exp, "log": math.log,
+    "pow": pow, "radians": math.radians, "degrees": math.degrees,
+    "min": min, "max": max,
+}
+_SAFE_CONSTS = {"pi": math.pi, "e": math.e}
+
+
+def safe_eval_expr(expr: str, ctx: dict) -> float:
+    """Danh gia an toan mot bieu thuc so trong bien (u, v, cac he so)."""
+    node = _ast.parse(expr.strip(), mode="eval")
+
+    def ev(n):
+        if isinstance(n, _ast.Expression):
+            return ev(n.body)
+        if isinstance(n, _ast.Constant) and isinstance(n.value, (int, float)):
+            return float(n.value)
+        if isinstance(n, _ast.BinOp):
+            l, r = ev(n.left), ev(n.right)
+            if isinstance(n.op, _ast.Add):
+                return l + r
+            if isinstance(n.op, _ast.Sub):
+                return l - r
+            if isinstance(n.op, _ast.Mult):
+                return l * r
+            if isinstance(n.op, _ast.Div):
+                return l / r
+            if isinstance(n.op, _ast.Pow):
+                return l ** r
+            if isinstance(n.op, _ast.Mod):
+                return l % r
+            if isinstance(n.op, _ast.FloorDiv):
+                return l // r
+            raise ValueError("Toan tu khong ho tro")
+        if isinstance(n, _ast.UnaryOp):
+            v = ev(n.operand)
+            if isinstance(n.op, _ast.USub):
+                return -v
+            if isinstance(n.op, _ast.UAdd):
+                return +v
+            raise ValueError("Toan tu khong ho tro")
+        if isinstance(n, _ast.Name):
+            if n.id in ctx:
+                return float(ctx[n.id])
+            if n.id in _SAFE_CONSTS:
+                return float(_SAFE_CONSTS[n.id])
+            raise ValueError(f"Bien/ham khong xac dinh: {n.id}")
+        if isinstance(n, _ast.Call) and isinstance(n.func, _ast.Name):
+            fn = n.func.id
+            if fn not in _SAFE_FUNCS:
+                raise ValueError(f"Ham khong an toan: {fn}")
+            args = [ev(a) for a in n.args]
+            return float(_SAFE_FUNCS[fn](*args))
+        if isinstance(n, _ast.IfExp):
+            return ev(n.body) if ev(n.test) else ev(n.orelse)
+        if isinstance(n, _ast.Compare):
+            l = ev(n.left)
+            ops = {
+                _ast.Lt: lambda a, b: a < b,
+                _ast.LtE: lambda a, b: a <= b,
+                _ast.Gt: lambda a, b: a > b,
+                _ast.GtE: lambda a, b: a >= b,
+                _ast.Eq: lambda a, b: a == b,
+                _ast.NotEq: lambda a, b: a != b,
+            }
+            res = True
+            cur = l
+            for op_, comp in zip(n.ops, n.comparators):
+                if type(op_) not in ops:
+                    raise ValueError("Phep so sanh khong ho tro")
+                rv = ev(comp)
+                if not ops[type(op_)](cur, rv):
+                    res = False
+                    break
+                cur = rv
+            return 1.0 if res else 0.0
+        raise ValueError("Bieu thuc khong hop le")
+
+    return ev(node)

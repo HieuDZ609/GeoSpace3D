@@ -178,14 +178,14 @@ def run_command(scene: Scene, text: str) -> str:
         B.gen_box(scene, a, dx, dy, dz)
         return "Đã tạo hình hộp chữ nhật"
     if fn in ("pyramid", "chop"):
-        _need(args, (2,), "Pyramid(cạnh đáy, chiều cao)")
-        s, h = _nums(args)
-        B.gen_pyramid(scene, s, h)
+        _need(args, (2, 5), "Pyramid(cạnh đáy, chiều cao)  hoặc  Pyramid(x, y, z, cạnh đáy, chiều cao)")
+        a, (s, h) = _head(args, 2)
+        B.gen_pyramid(scene, s, h, center=a)
         return "Đã tạo hình chóp"
     if fn in ("prism", "langtru"):
-        _need(args, (2,), "Prism(cạnh đáy, chiều cao)")
-        s, h = _nums(args)
-        B.gen_prism(scene, s, h)
+        _need(args, (2, 5), "Prism(cạnh đáy, chiều cao)  hoặc  Prism(x, y, z, cạnh đáy, chiều cao)")
+        a, (s, h) = _head(args, 2)
+        B.gen_prism(scene, s, h, center=a)
         return "Đã tạo lăng trụ"
     if fn in ("cylinder", "tru"):
         _need(args, (2, 5), "Cylinder(r, h)  hoặc  Cylinder(x, y, z, r, h)")

@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QAbstractSpinBox,
     QComboBox,
     QDoubleSpinBox,
+    QSpinBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -540,6 +541,197 @@ class _GeometryTab(QScrollArea):
 
 
 # ======================================================================
+#  Tab Bezier: nhap diem kiem soat + tao duong cong Bezier
+# ======================================================================
+class _BezierTab(QWidget):
+    def __init__(self, panel: "SidePanel") -> None:
+        super().__init__()
+        self.panel = panel
+        w = panel.win
+        v = QVBoxLayout(self)
+        v.setContentsMargins(8, 4, 8, 8)
+
+        v.addWidget(_heading("Thêm điểm kiểm soát"))
+        r = QHBoxLayout()
+        r.addWidget(QLabel("Tên"))
+        self.pt_name = QLineEdit()
+        self.pt_name.setPlaceholderText("tự đặt")
+        self.pt_name.setMaximumWidth(80)
+        r.addWidget(self.pt_name)
+        r.addStretch(1)
+        v.addLayout(r)
+
+        r = QHBoxLayout()
+        self.spins: list[QDoubleSpinBox] = []
+        for ax in ("X", "Y", "Z"):
+            r.addWidget(QLabel(ax))
+            sp = QDoubleSpinBox()
+            sp.setRange(-100, 100)
+            sp.setDecimals(3)
+            sp.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+            sp.setMinimumWidth(52)
+            r.addWidget(sp)
+            self.spins.append(sp)
+        v.addLayout(r)
+        b = QPushButton("Thêm điểm")
+        b.clicked.connect(self._add_point)
+        v.addWidget(b)
+
+        self.msg = QLabel("")
+        self.msg.setWordWrap(True)
+        v.addWidget(self.msg)
+
+        v.addWidget(_heading("Tạo đường cong Bezier"))
+        r = QHBoxLayout()
+        r.addWidget(QLabel("Điểm KS"))
+        self.names = QLineEdit()
+        self.names.setPlaceholderText("A B C D (>=2)")
+        r.addWidget(self.names)
+        v.addLayout(r)
+        b = QPushButton("Tạo Bezier")
+        b.clicked.connect(self._create)
+        v.addWidget(b)
+
+        v.addWidget(_heading("Mặt tham số (Parametric Surface)"))
+        r = QHBoxLayout()
+        r.addWidget(QLabel("Mẫu"))
+        self.preset = QComboBox()
+        self.preset.addItems(["Wave", "Saddle", "Paraboloid", "Ripple mountain", "Torus", "Sphere", "Custom"])
+        self.preset.currentIndexChanged.connect(self._apply_preset)
+        r.addWidget(self.preset)
+        v.addLayout(r)
+
+        for lbl, attr, default in (("X(u,v)", "xe", "u"),
+                                   ("Y(u,v)", "ye", "v"),
+                                   ("Z(u,v)", "ze", "u**2+v**2")):
+            r = QHBoxLayout()
+            r.addWidget(QLabel(lbl))
+            le = QLineEdit(default)
+            setattr(self, attr, le)
+            r.addWidget(le)
+            v.addLayout(r)
+
+        r = QHBoxLayout()
+        self.coeffs = []
+        for name in ("a", "b", "c", "d"):
+            r.addWidget(QLabel(name))
+            sp = QDoubleSpinBox()
+            sp.setRange(-100, 100)
+            sp.setDecimals(3)
+            sp.setValue(1.0)
+            self.coeffs.append(sp)
+            r.addWidget(sp)
+        v.addLayout(r)
+
+        r = QHBoxLayout()
+        for lbl, attr, default in (("umin", "umin", -3.0), ("umax", "umax", 3.0),
+                                   ("vmin", "vmin", -3.0), ("vmax", "vmax", 3.0)):
+            r.addWidget(QLabel(lbl))
+            sp = QDoubleSpinBox()
+            sp.setRange(-100, 100)
+            sp.setDecimals(2)
+            sp.setValue(default)
+            setattr(self, attr, sp)
+            r.addWidget(sp)
+        v.addLayout(r)
+
+        r = QHBoxLayout()
+        r.addWidget(QLabel("nu"))
+        self.nu = QSpinBox()
+        self.nu.setRange(2, 80)
+        self.nu.setValue(25)
+        r.addWidget(self.nu)
+        r.addWidget(QLabel("nv"))
+        self.nv = QSpinBox()
+        self.nv.setRange(2, 80)
+        self.nv.setValue(25)
+        r.addWidget(self.nv)
+        v.addLayout(r)
+
+        b = QPushButton("Tạo mặt tham số")
+        b.clicked.connect(self._create_surface)
+        v.addWidget(b)
+
+        self.surf_msg = QLabel("")
+        self.surf_msg.setWordWrap(True)
+        v.addWidget(self.surf_msg)
+
+        v.addStretch(1)
+        self._apply_preset(0)
+
+    def _add_point(self) -> None:
+        scene = self.panel.win.scene
+        name = self.pt_name.text().strip() or next_point_name(scene)
+        builders.gen_point(scene, name, [s.value() for s in self.spins])
+        self.pt_name.clear()
+        self.msg.setStyleSheet("color:#1e8449;")
+        self.msg.setText(f"✓ Đã thêm điểm {name}")
+
+    def _create(self) -> None:
+        w = self.panel.win
+        names = self.names.text().split()
+        ids = [w._find_point(n) for n in names]
+        if len(ids) < 2 or any(i is None for i in ids):
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(w, "Lỗi", "Cần ít nhất 2 điểm hợp lệ.")
+            return
+        builders.gen_bezier(w.scene, [i for i in ids if i is not None], name="".join(names))
+        w._refresh_tree()
+        w.viewport.update()
+        self.msg.setStyleSheet("color:#1e8449;")
+        self.msg.setText("✓ Đã tạo đường cong Bezier")
+        self.names.clear()
+
+    def _apply_preset(self, idx: int) -> None:
+        import math
+        presets = {
+            0: ("u", "v", "a*sin(b*u)*cos(b*v)",
+                [1.0, 1.0, 0.0, 0.0], -3.0, 3.0, -3.0, 3.0),
+            1: ("u", "v", "a*(u*u - v*v)",
+                [1.0, 0.0, 0.0, 0.0], -3.0, 3.0, -3.0, 3.0),
+            2: ("u", "v", "a*(u*u+v*v)",
+                [1.0, 0.0, 0.0, 0.0], -3.0, 3.0, -3.0, 3.0),
+            3: ("u", "v", "a*exp(-b*(u*u+v*v)) + c*sin(d*sqrt(u*u+v*v+1e-9))",
+                [4.0, 0.15, 0.6, 3.0], -5.0, 5.0, -5.0, 5.0),
+            4: ("(a+b*cos(v))*cos(u)", "(a+b*cos(v))*sin(u)", "b*sin(v)",
+                [3.0, 1.0, 0.0, 0.0], 0.0, 2*math.pi, 0.0, 2*math.pi),
+            5: ("a*sin(v)*cos(u)", "a*sin(v)*sin(u)", "a*cos(v)",
+                [1.0, 0.0, 0.0, 0.0], 0.0, 2*math.pi, 0.0, math.pi),
+        }
+        if idx in presets:
+            xe, ye, ze, coeffs, umin, umax, vmin, vmax = presets[idx]
+            self.xe.setText(xe)
+            self.ye.setText(ye)
+            self.ze.setText(ze)
+            for sp, val in zip(self.coeffs, coeffs):
+                sp.setValue(val)
+            self.umin.setValue(umin)
+            self.umax.setValue(umax)
+            self.vmin.setValue(vmin)
+            self.vmax.setValue(vmax)
+
+    def _create_surface(self) -> None:
+        from core import builders
+        w = self.panel.win
+        coeffs = {chr(ord("a") + i): self.coeffs[i].value() for i in range(4)}
+        try:
+            oid = builders.gen_parametric_surface(
+                w.scene, self.xe.text(), self.ye.text(), self.ze.text(),
+                coeffs, self.umin.value(), self.umax.value(),
+                self.vmin.value(), self.vmax.value(),
+                self.nu.value(), self.nv.value(),
+            )
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(w, "Lỗi", str(e))
+            return
+        w._refresh_tree()
+        w.viewport.update()
+        self.surf_msg.setStyleSheet("color:#1e8449;")
+        self.surf_msg.setText("✓ Đã tạo mặt tham số")
+
+
+# ======================================================================
 #  Tab 3: Thong tin chi tiet
 # ======================================================================
 class _InfoTab(QWidget):
@@ -635,9 +827,11 @@ class SidePanel(QTabWidget):
         self.setMinimumWidth(300)
         self.tab_numeric = _NumericTab(self)
         self.tab_geometry = _GeometryTab(self)
+        self.tab_bezier = _BezierTab(self)
         self.tab_info = _InfoTab(self)
         self.addTab(self.tab_numeric, "Số học")
         self.addTab(self.tab_geometry, "Hình học")
+        self.addTab(self.tab_bezier, "Bezier")
         self.addTab(self.tab_info, "Thông tin")
         self.setCurrentIndex(1)     # mo san tab Hinh hoc
         f = self.tabBar().font()

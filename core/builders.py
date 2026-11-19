@@ -144,6 +144,53 @@ def gen_face(
     return _face(scene, pt_ids, color=color, name=name)
 
 
+def gen_bezier(
+    scene: Scene,
+    pt_ids: Sequence[str],
+    samples: int = 60,
+    color: RGBA = (0.85, 0.20, 0.60, 1.0),
+    name: str | None = None,
+) -> str:
+    """Duong cong Bezier (Bernstein) qua cac diem kiem soat `pt_ids`."""
+    oid = scene.new_id("c")
+    scene.add(
+        Node(oid, "curve", _uniq_name(scene, name or "Bezier"), "bezier",
+             {"pts": list(pt_ids), "samples": int(samples)},
+             color=color, group="Curves")
+    )
+    scene.evaluate()
+    return oid
+
+
+def gen_parametric_surface(
+    scene: Scene,
+    X: str,
+    Y: str,
+    Z: str,
+    coeffs: dict,
+    umin: float = -3.0,
+    umax: float = 3.0,
+    vmin: float = -3.0,
+    vmax: float = 3.0,
+    nu: int = 20,
+    nv: int = 20,
+    color: RGBA = (0.4, 0.7, 0.9, 0.45),
+    name: str | None = None,
+) -> str:
+    """Mat tham so tong quat P(u,v)=(X(u,v),Y(u,v),Z(u,v)) lay mau luoi nu x nv."""
+    oid = scene.new_id("u")
+    scene.add(
+        Node(oid, "surface", _uniq_name(scene, name or "Surface"), "parametric",
+             {"X": X, "Y": Y, "Z": Z, "coeffs": {k: float(v) for k, v in coeffs.items()},
+              "umin": float(umin), "umax": float(umax),
+              "vmin": float(vmin), "vmax": float(vmax),
+              "nu": int(nu), "nv": int(nv)},
+             color=color, group="Surfaces")
+    )
+    scene.evaluate()
+    return oid
+
+
 # ---------------- khoi da dien ----------------
 
 def gen_cube(scene: Scene, A_xyz: Sequence[float], edge: float = 2.0) -> dict[str, list[str]]:
@@ -194,15 +241,17 @@ def gen_pyramid(
     scene: Scene,
     base_side: float = 4.0,
     height: float = 5.0,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
 ) -> dict[str, list[str]]:
     a = float(base_side) / 2.0
     h = float(height)
+    cx, cy, cz = [float(x) for x in center]
     with scene.batch():
-        A = _pt(scene, "A", (-a, -a, 0.0))
-        B = _pt(scene, "B", (a, -a, 0.0))
-        C = _pt(scene, "C", (a, a, 0.0))
-        D = _pt(scene, "D", (-a, a, 0.0))
-        S = _pt(scene, "S", (0.0, 0.0, h))
+        A = _pt(scene, "A", (cx - a, cy - a, cz))
+        B = _pt(scene, "B", (cx + a, cy - a, cz))
+        C = _pt(scene, "C", (cx + a, cy + a, cz))
+        D = _pt(scene, "D", (cx - a, cy + a, cz))
+        S = _pt(scene, "S", (cx, cy, cz + h))
         for u, v in [
             (A, B), (B, C), (C, D), (D, A),
             (S, A), (S, B), (S, C), (S, D),
@@ -225,22 +274,24 @@ def gen_prism(
     scene: Scene,
     base_side: float = 3.0,
     height: float = 4.0,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
 ) -> dict[str, list[str]]:
     r = float(base_side)
     h = float(height)
+    cx, cy, cz = [float(x) for x in center]
     with scene.batch():
         pts = [
-            (r * math.cos(2.0 * math.pi * i / 3.0),
-             r * math.sin(2.0 * math.pi * i / 3.0),
-             0.0)
+            (cx + r * math.cos(2.0 * math.pi * i / 3.0),
+             cy + r * math.sin(2.0 * math.pi * i / 3.0),
+             cz)
             for i in range(3)
         ]
         A = _pt(scene, "A", pts[0])
         B = _pt(scene, "B", pts[1])
         C = _pt(scene, "C", pts[2])
-        A1 = _pt(scene, "A'", (pts[0][0], pts[0][1], h))
-        B1 = _pt(scene, "B'", (pts[1][0], pts[1][1], h))
-        C1 = _pt(scene, "C'", (pts[2][0], pts[2][1], h))
+        A1 = _pt(scene, "A'", (pts[0][0], pts[0][1], cz + h))
+        B1 = _pt(scene, "B'", (pts[1][0], pts[1][1], cz + h))
+        C1 = _pt(scene, "C'", (pts[2][0], pts[2][1], cz + h))
         for u, v in [
             (A, B), (B, C), (C, A),
             (A1, B1), (B1, C1), (C1, A1),

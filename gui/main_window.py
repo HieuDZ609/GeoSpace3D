@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import (
 
 from core.builders import (
     gen_angle,
+    gen_bezier,
     gen_box,
     gen_cone,
     gen_cube,
@@ -56,13 +57,14 @@ from gui.dialogs import AddPointDialog, CreateSolidDialog
 from gui.side_panel import SidePanel
 from gui.viewport import Viewport
 
-GROUPS = ["Điểm", "Đoạn thẳng", "Mặt", "Khối", "Mặt cong", "Số đo", "Khác"]
+GROUPS = ["Điểm", "Đoạn thẳng", "Mặt", "Khối", "Mặt cong", "Đường cong", "Số đo", "Khác"]
 GROUP_MAP = {
     "Points": "Điểm",
     "Segments": "Đoạn thẳng",
     "Faces": "Mặt",
     "Solids": "Khối",
     "Surfaces": "Mặt cong",
+    "Curves": "Đường cong",
     "Measures": "Số đo",
     "Other": "Khác",
 }
@@ -450,10 +452,12 @@ class MainWindow(QMainWindow):
         ids = self._ask_points(2, "Chọn 2 điểm để lấy trung điểm")
         if not ids:
             return
-        name, ok = QInputDialog.getText(
-            self, "Tên trung điểm", "Đặt tên (để trống = tự đặt):", text=""
+        raw = self._input_text(
+            "Tên trung điểm", "Đặt tên (để trống = tự đặt):"
         )
-        name = name.strip() if ok and name.strip() else None
+        if raw is None:                     # Cancel -> thoát im lặng
+            return
+        name = raw.strip() or None
         gen_midpoint(self.scene, ids[0], ids[1], name=name)
 
     def add_on_segment(self) -> None:
@@ -486,14 +490,33 @@ class MainWindow(QMainWindow):
             gen_segment(self.scene, ids[0], ids[1])
 
     def add_face(self) -> None:
-        names = QInputDialog.getText(
-            self, "Mặt phẳng", "Nhập tên các điểm cách nhau bởi dấu cách (>=3):"
-        )[0].split()
+        raw = self._input_text(
+            "Mặt phẳng", "Nhập tên các điểm cách nhau bởi dấu cách (>=3):"
+        )
+        if raw is None:                     # Cancel -> thoát im lặng
+            return
+        names = raw.split()
         ids = [self._find_point(n) for n in names]
         if len(ids) < 3 or any(i is None for i in ids):
             QMessageBox.warning(self, "Lỗi", "Không tìm thấy đủ 3 điểm hợp lệ.")
             return
         gen_face(self.scene, [i for i in ids if i is not None], name="".join(names))
+
+    def add_bezier(self) -> None:
+        raw = self._input_text(
+            "Đường cong Bezier",
+            "Nhập tên các điểm kiểm soát cách nhau bởi dấu cách (>=2):",
+        )
+        if raw is None:                     # Cancel -> thoát im lặng
+            return
+        names = raw.split()
+        ids = [self._find_point(n) for n in names]
+        if len(ids) < 2 or any(i is None for i in ids):
+            QMessageBox.warning(self, "Lỗi", "Cần ít nhất 2 điểm hợp lệ.")
+            return
+        gen_bezier(self.scene, [i for i in ids if i is not None], name="".join(names))
+        self._refresh_tree()
+        self.viewport.update()
 
     def add_face3(self) -> None:
         ids = self._ask_points(3, "Chọn 3 điểm để tạo mặt phẳng")
@@ -527,9 +550,9 @@ class MainWindow(QMainWindow):
         elif kind == "box":
             gen_box(self.scene, p["A"], p["dx"], p["dy"], p["dz"])
         elif kind == "pyramid":
-            gen_pyramid(self.scene, p["side"], p["height"])
+            gen_pyramid(self.scene, p["side"], p["height"], center=p["A"])
         elif kind == "prism":
-            gen_prism(self.scene, p["side"], p["height"])
+            gen_prism(self.scene, p["side"], p["height"], center=p["A"])
         elif kind == "cylinder":
             gen_cylinder(self.scene, p["A"], p["side"], p["height"])
         elif kind == "cone":
@@ -639,10 +662,18 @@ class MainWindow(QMainWindow):
         )
 
     # ---------------- helpers ----------------
+    def _input_text(self, title: str, label: str, text: str = "") -> str | None:
+        """Hội thoại nhập chuỗi; trả None nếu người dùng bấm Cancel."""
+        val, ok = QInputDialog.getText(self, title, label, text=text)
+        return val if ok else None
+
     def _ask_points(self, n: int, title: str) -> list[str] | None:
-        names = QInputDialog.getText(
-            self, title, f"Nhập tên {n} điểm cách nhau bởi dấu cách:"
-        )[0].split()
+        raw = self._input_text(
+            title, f"Nhập tên {n} điểm cách nhau bởi dấu cách:"
+        )
+        if raw is None:                     # Cancel -> thoát im lặng
+            return None
+        names = raw.split()
         ids = [self._find_point(x) for x in names]
         if len(ids) != n or any(i is None for i in ids):
             QMessageBox.warning(self, "Lỗi", f"Cần đúng {n} điểm hợp lệ.")
@@ -657,13 +688,19 @@ class MainWindow(QMainWindow):
 
     def add_altitude_to_plane(self) -> None:
         """Hạ đường cao SH xuống mặt phẳng qua các điểm (ví dụ MNAB)"""
-        p_name = QInputDialog.getText(self, "Đường cao xuống mặt phẳng", "Nhập tên điểm đỉnh S:")[0].strip()
+        p_name = self._input_text("Đường cao xuống mặt phẳng", "Nhập tên điểm đỉnh S:")
+        if p_name is None:                  # Cancel -> thoát im lặng
+            return
+        p_name = p_name.strip()
         s_id = self._find_point(p_name)
         if not s_id:
             QMessageBox.warning(self, "Lỗi", f"Không tìm thấy điểm '{p_name}'.")
             return
-            
-        pts_str = QInputDialog.getText(self, "Mặt phẳng đáy", "Nhập tên các điểm mặt phẳng (cách nhau dấu cách, ví dụ: M N A B hoặc A B C):")[0].split()
+
+        pts_str = self._input_text("Mặt phẳng đáy", "Nhập tên các điểm mặt phẳng (cách nhau dấu cách, ví dụ: M N A B hoặc A B C):")
+        if pts_str is None:                 # Cancel -> thoát im lặng
+            return
+        pts_str = pts_str.split()
         plane_pt_ids = [self._find_point(x) for x in pts_str]
         if len(plane_pt_ids) < 3 or any(pid is None for pid in plane_pt_ids):
             QMessageBox.warning(self, "Lỗi", "Cần nhập ít nhất 3 điểm hợp lệ để tạo mặt phẳng.")
@@ -673,7 +710,10 @@ class MainWindow(QMainWindow):
         self.viewport.update()
     def add_altitude_to_line(self) -> None:
         """Hạ đường cao SH xuống đoạn thẳng AB"""
-        p_name = QInputDialog.getText(self, "Đường cao xuống đường thẳng", "Nhập tên điểm đỉnh S:")[0].strip()
+        p_name = self._input_text("Đường cao xuống đường thẳng", "Nhập tên điểm đỉnh S:")
+        if p_name is None:                  # Cancel -> thoát im lặng
+            return
+        p_name = p_name.strip()
         s_id = self._find_point(p_name)
         if not s_id:
             QMessageBox.warning(self, "Lỗi", f"Không tìm thấy điểm '{p_name}'.")
@@ -695,7 +735,10 @@ class MainWindow(QMainWindow):
         self.viewport.update()
     def add_plane_from_points(self) -> None:
         """Dựng mặt phẳng qua các điểm bất kỳ"""
-        pts_str = QInputDialog.getText(self, "Mặt phẳng", "Nhập tên các điểm qua mặt phẳng (ví dụ: A B C hoặc M N A B):")[0].split()
+        raw = self._input_text("Mặt phẳng", "Nhập tên các điểm qua mặt phẳng (ví dụ: A B C hoặc M N A B):")
+        if raw is None:                     # Cancel -> thoát im lặng
+            return
+        pts_str = raw.split()
         pt_ids = [self._find_point(x) for x in pts_str]
         if len(pt_ids) < 3 or any(pid is None for pid in pt_ids):
             QMessageBox.warning(self, "Lỗi", "Cần ít nhất 3 điểm hợp lệ.")

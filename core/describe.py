@@ -12,7 +12,7 @@ from core.scene import Scene
 KIND_VI = {
     "point": "Điểm", "segment": "Đoạn thẳng", "line": "Đường thẳng", "plane": "Mặt phẳng",
     "face": "Mặt", "solid": "Khối", "surface": "Mặt cong", "wireframe": "Khung dây",
-    "measure": "Số đo",
+    "curve": "Đường cong", "measure": "Số đo",
 }
 
 
@@ -282,6 +282,19 @@ def describe(scene: Scene, oid: str | None) -> str:
             body = _describe_solid(scene, o)
         elif o.kind == "surface":
             body = _describe_surface(scene, o)
+        elif o.kind == "curve":
+            ids = list(o.params.get("pts", []))
+            names = [_name(scene, i) for i in ids]
+            pts = [np.asarray(scene.objects[i].value, dtype=np.float64) for i in ids if i in scene.objects]
+            L = 0.0
+            if len(pts) >= 2:
+                L = sum(float(np.linalg.norm(pts[j+1]-pts[j])) for j in range(len(pts)-1))
+            body = _table([
+                ("Số điểm kiểm soát", str(len(ids))),
+                ("Điểm kiểm soát", ", ".join(names)),
+                ("Số mẫu", str(o.params.get("samples", 60))),
+                ("Độ dài xấp xỉ", fmt(L)),
+            ])
         elif o.kind == "measure" and isinstance(o.value, MeasureData):
             body = _table([("Giá trị", html.escape(o.value.text))])
         else:

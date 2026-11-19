@@ -59,7 +59,7 @@ from OpenGL.GL import (
     glViewport,
 )
 from OpenGL.GL import GL_COMPILE, GL_LINE_LOOP, GL_QUADS, glCallList, glEndList, glGenLists, glNewList
-from PyQt6.QtCore import Qt, pyqtSignal, QPointF
+from PyQt6.QtCore import QTimer, Qt, pyqtSignal, QPointF
 from PyQt6.QtGui import QColor, QFont, QPainter
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 
@@ -145,6 +145,12 @@ class Viewport(QOpenGLWidget):
         self.selected_id: str | None = None
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
+        # Di chuyen muon ma kieu game: giu phim de chay tiep (WASD/Space/Ctrl)
+        self._keys: set[int] = set()
+        self._move_timer = QTimer(self)
+        self._move_timer.setInterval(16)          # ~60 FPS
+        self._move_timer.timeout.connect(self._move_step)
+
     # ---------------- setup ----------------
     def set_scene(self, scene: Scene) -> None:
         self.scene = scene
@@ -154,6 +160,8 @@ class Viewport(QOpenGLWidget):
         self.lock_origin = locked
         if locked:
             self.target = [0.0, 0.0, 0.0]
+            self._keys.clear()
+            self._move_timer.stop()
         self.viewStateChanged.emit()
         self.update()
 
@@ -233,6 +241,30 @@ class Viewport(QOpenGLWidget):
         glLoadMatrixd(self._mv)
 
         self._vp = (0, 0, w, h)
+
+    # ---------------- camera POV ----------------
+    def _view_dir(self) -> np.ndarray:
+        """Vector tu target tro ve eye (do dai = dist), dung de xoay camera."""
+        yaw = math.radians(self.yaw)
+        pitch = math.radians(self.pitch)
+        return np.array([
+            math.cos(pitch) * math.cos(yaw),
+            math.cos(pitch) * math.sin(yaw),
+            math.sin(pitch),
+        ])
+
+    def _rotate_view(self, d_yaw: float, d_pitch: float) -> None:
+        """Xoay yaw/pitch.
+        - Khoa goc O: quyen quanh O nhu cu (target luon la O).
+        - Khong khoa: POV - xoay quanh chinh vi tri camera, giu nguyen eye.
+        """
+        eye = None
+        if not self.lock_origin:
+            eye = np.array(self.target, dtype=np.float64) + self.dist * self._view_dir()
+        self.yaw = (self.yaw + d_yaw) % 360.0
+        self.pitch = max(-89.0, min(89.0, self.pitch + d_pitch))
+        if eye is not None:
+            self.target = list(eye - self.dist * self._view_dir())
 
     # ---------------- paint ----------------
     def paintGL(self) -> None:
@@ -754,9 +786,12 @@ class Viewport(QOpenGLWidget):
         self._last = ev.position()
 
         if self._mode == "rotate":
-            # Xoay 4 huong (trai/phai/len/xuong)
-            self.yaw = (self.yaw - dx * 0.30) % 360.0
-            self.pitch = max(-89.0, min(89.0, self.pitch - dy * 0.30))
+            # Xoay 4 huong; khong khoa goc O thi xoay quanh camera (POV)
+            # o che do POV, chieu doc (len/xuong) dao nguoc de hop ly hon
+            if self.lock_origin:
+                self._rotate_view(-dx * 0.30, -dy * 0.30)
+            else:
+                self._rotate_view(-dx * 0.30, +dy * 0.30)
             self.update()
         elif self._mode == "pan" and not self.lock_origin and self._mv is not None:
             k = 0.0018 * self.dist
@@ -779,14 +814,23 @@ class Viewport(QOpenGLWidget):
 
     def keyPressEvent(self, ev) -> None:
         k = ev.key()
+
+        # Di chuyen muon ma kieu game: giu WASD/Space/Ctrl de chay tiep.
+        if k in (Qt.Key.Key_W, Qt.Key.Key_S, Qt.Key.Key_A, Qt.Key.Key_D,
+                 Qt.Key.Key_Space, Qt.Key.Key_Control):
+            if not self.lock_origin:
+                self._keys.add(k)
+                self._sync_move_timer()
+            return
+
         if k == Qt.Key.Key_Left:
-            self.yaw = (self.yaw - 3.0) % 360.0
+            self._rotate_view(-3.0, 0.0)
         elif k == Qt.Key.Key_Right:
-            self.yaw = (self.yaw + 3.0) % 360.0
+            self._rotate_view(3.0, 0.0)
         elif k == Qt.Key.Key_Up:
-            self.pitch = min(89.0, self.pitch + 3.0)
+            self._rotate_view(0.0, 3.0)
         elif k == Qt.Key.Key_Down:
-            self.pitch = max(-89.0, self.pitch - 3.0)
+            self._rotate_view(0.0, -3.0)
         elif k == Qt.Key.Key_L:
             self.set_lock_origin(not self.lock_origin)
             return
@@ -807,19 +851,50 @@ class Viewport(QOpenGLWidget):
             self.yaw, self.pitch = 90.0, 0.0
         elif k == Qt.Key.Key_0:
             self.yaw, self.pitch = -50.0, 24.0
-        elif not self.lock_origin and self._mv is not None:
-            step = self.dist * 0.06
-            right_vec = self._mv[0, :3]
-            up_vec = self._mv[1, :3]
-            if k == Qt.Key.Key_W:
-                self.target = list(np.array(self.target) + up_vec * step)
-            elif k == Qt.Key.Key_S:
-                self.target = list(np.array(self.target) - up_vec * step)
-            elif k == Qt.Key.Key_A:
-                self.target = list(np.array(self.target) - right_vec * step)
-            elif k == Qt.Key.Key_D:
-                self.target = list(np.array(self.target) + right_vec * step)
         self.update()
+
+    def keyReleaseEvent(self, ev) -> None:
+        self._keys.discard(ev.key())
+        self._sync_move_timer()
+
+    def focusOutEvent(self, ev) -> None:
+        # Tranh "kin" phim khi mat focus trong luc di chuyen.
+        self._keys.clear()
+        self._move_timer.stop()
+        super().focusOutEvent(ev)
+
+    def _sync_move_timer(self) -> None:
+        if self._keys and not self.lock_origin:
+            if not self._move_timer.isActive():
+                self._move_timer.start()
+        else:
+            self._move_timer.stop()
+
+    def _move_step(self) -> None:
+        """Moi nhip ~16ms: dich chuyen camera theo cac phim dang giu."""
+        if self.lock_origin or not self._keys:
+            return
+        dt = self._move_timer.interval() / 1000.0
+        step = self.dist * 0.7 * dt
+        yaw = math.radians(self.yaw)
+        fwd = np.array([-math.cos(yaw), -math.sin(yaw), 0.0])
+        right = np.array([-math.sin(yaw), math.cos(yaw), 0.0])
+        delta = np.zeros(3)
+        if Qt.Key.Key_W in self._keys:
+            delta += fwd
+        if Qt.Key.Key_S in self._keys:
+            delta -= fwd
+        if Qt.Key.Key_A in self._keys:
+            delta -= right
+        if Qt.Key.Key_D in self._keys:
+            delta += right
+        if Qt.Key.Key_Space in self._keys:
+            delta += np.array([0.0, 0.0, 1.0])
+        if Qt.Key.Key_Control in self._keys:
+            delta -= np.array([0.0, 0.0, 1.0])
+        if np.any(delta):
+            self.target = list(np.array(self.target) + delta * step)
+            self.update()
 
     def reset_view(self) -> None:
         self.yaw, self.pitch, self.dist = -50.0, 24.0, 22.0
