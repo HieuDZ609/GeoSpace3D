@@ -576,10 +576,9 @@ class MainWindow(QMainWindow):
         v = np.cross(nvec, u)
         v /= np.linalg.norm(v)
         corners = []
-        for su in (-1, 1):
-            for sv in (-1, 1):
-                pt = np.array([px, py, pz]) + size*su*u + size*sv*v
-                corners.append(tuple(float(x) for x in pt))
+        for su, sv in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+            pt = np.array([px, py, pz]) + size*su*u + size*sv*v
+            corners.append(tuple(float(x) for x in pt))
         from core import builders
         ids = [builders.gen_point(self.scene, f"Q{i}", pt) for i, pt in enumerate(corners)]
         builders.gen_face(self.scene, ids, color=(0.5, 0.7, 0.9, 0.35))
