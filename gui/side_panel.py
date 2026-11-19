@@ -611,28 +611,34 @@ class _BezierTab(QWidget):
             r.addWidget(le)
             v.addLayout(r)
 
+        # he so: 2 dong x 2 de panel hep
         r = QHBoxLayout()
         self.coeffs = []
-        for name in ("a", "b", "c", "d"):
+        for name in ("a", "b"):
             r.addWidget(QLabel(name))
             sp = QDoubleSpinBox()
-            sp.setRange(-100, 100)
-            sp.setDecimals(3)
-            sp.setValue(1.0)
-            self.coeffs.append(sp)
-            r.addWidget(sp)
+            sp.setRange(-100, 100); sp.setDecimals(3); sp.setValue(1.0)
+            self.coeffs.append(sp); r.addWidget(sp)
+        v.addLayout(r)
+        r = QHBoxLayout()
+        for name in ("c", "d"):
+            r.addWidget(QLabel(name))
+            sp = QDoubleSpinBox()
+            sp.setRange(-100, 100); sp.setDecimals(3); sp.setValue(0.0 if name in ("c","d") else 1.0)
+            self.coeffs.append(sp); r.addWidget(sp)
         v.addLayout(r)
 
         r = QHBoxLayout()
-        for lbl, attr, default in (("umin", "umin", -3.0), ("umax", "umax", 3.0),
-                                   ("vmin", "vmin", -3.0), ("vmax", "vmax", 3.0)):
+        for lbl, attr, default in (("umin", "umin", -3.0), ("umax", "umax", 3.0)):
             r.addWidget(QLabel(lbl))
-            sp = QDoubleSpinBox()
-            sp.setRange(-100, 100)
-            sp.setDecimals(2)
-            sp.setValue(default)
-            setattr(self, attr, sp)
-            r.addWidget(sp)
+            sp = QDoubleSpinBox(); sp.setRange(-100, 100); sp.setDecimals(2); sp.setValue(default)
+            setattr(self, attr, sp); r.addWidget(sp)
+        v.addLayout(r)
+        r = QHBoxLayout()
+        for lbl, attr, default in (("vmin", "vmin", -3.0), ("vmax", "vmax", 3.0)):
+            r.addWidget(QLabel(lbl))
+            sp = QDoubleSpinBox(); sp.setRange(-100, 100); sp.setDecimals(2); sp.setValue(default)
+            setattr(self, attr, sp); r.addWidget(sp)
         v.addLayout(r)
 
         r = QHBoxLayout()
@@ -916,16 +922,16 @@ class SidePanel(QTabWidget):
         super().__init__()
         self.win = win
         self.setDocumentMode(True)
-        self.setMinimumWidth(300)
+        self.setMinimumWidth(225)
         self.tab_numeric = _NumericTab(self)
         self.tab_geometry = _GeometryTab(self)
-        self.tab_bezier = _BezierTab(self)
         self.tab_equation = _EquationTab(self)
+        self.tab_bezier = _BezierTab(self)
         self.tab_info = _InfoTab(self)
         self.addTab(self.tab_numeric, "Số học")
         self.addTab(self.tab_geometry, "Hình học")
-        self.addTab(self.tab_bezier, "Bezier")
         self.addTab(self.tab_equation, "Phương trình")
+        self.addTab(self.tab_bezier, "Bezier")
         self.addTab(self.tab_info, "Thông tin")
         self.setCurrentIndex(1)     # mo san tab Hinh hoc
         f = self.tabBar().font()

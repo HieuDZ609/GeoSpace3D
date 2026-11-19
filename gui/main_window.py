@@ -177,7 +177,7 @@ class MainWindow(QMainWindow):
         dl = QDockWidget("Công cụ", self)
         dl.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
         dl.setTitleBarWidget(QWidget())          # an thanh tieu de, nhin nhu panel co dinh
-        dl.setMinimumWidth(310)
+        dl.setMinimumWidth(233)
         dl.setWidget(self.panel)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dl)
 
